@@ -1,0 +1,17 @@
+{
+  "name": "ebay-watch",
+  "private": true,
+  "type": "module",
+  "description": "eBay search dashboard. Playwright stack matches plex-dashboard (plex-smash-deck): @playwright/test + playwright, no eBay API.",
+  "scripts": {
+    "search": "node scripts/ebay-search.mjs",
+    "test:pw": "playwright test --config=playwright.config.ts",
+    "postinstall": "playwright install firefox chromium",
+    "postinstall:pw": "playwright install firefox chromium"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.58.2",
+    "cheerio": "^1.0.0",
+    "playwright": "^1.58.2"
+  }
+}

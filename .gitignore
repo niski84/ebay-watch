@@ -1,0 +1,11 @@
+/ebay-watch
+test-results/
+.cursor/
+*.db
+*.db-shm
+*.db-wal
+.env
+server.log
+server.pid
+data/
+node_modules/
