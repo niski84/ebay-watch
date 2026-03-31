@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings — eBay watch</title>
+  <script>
+    (function () {
+      try {
+        var k = "ebay-watch-theme";
+        var t = localStorage.getItem(k);
+        if (t !== "light" && t !== "dark") {
+          t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    html {
+      font-family: system-ui, Segoe UI, Roboto, sans-serif;
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --text: #e7edf4;
+      --muted: #8b9cb3;
+      --accent: #3d8bfd;
+      --border: #2a3545;
+    }
+    html[data-theme="light"] {
+      color-scheme: light;
+      --bg: #eef1f6;
+      --panel: #ffffff;
+      --text: #15202b;
+      --muted: #5a6b7d;
+      --accent: #1565d8;
+      --border: #d0d7e2;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); line-height: 1.5; }
+    header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1rem;
+      justify-content: space-between;
+    }
+    .header-nav {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .header-nav a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .header-nav a:hover { text-decoration: underline; }
+    h1 { font-size: 1.25rem; margin: 0; font-weight: 600; }
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.85rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      padding: 0.45rem 0.75rem;
+      cursor: pointer;
+    }
+    main { padding: 1.5rem; max-width: 52rem; margin: 0 auto; }
+    h2 { font-size: 1rem; color: var(--muted); font-weight: 600; margin: 0 0 0.75rem; }
+    .section-hint {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin: -0.25rem 0 1rem;
+      line-height: 1.45;
+    }
+    .settings-debug-log {
+      margin: 0.5rem 0 1rem;
+      padding: 0.75rem 0.85rem;
+      min-height: 12rem;
+      max-height: min(50vh, 28rem);
+      overflow: auto;
+      font-size: 0.72rem;
+      line-height: 1.45;
+      font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace;
+      background: color-mix(in srgb, var(--bg) 65%, var(--panel));
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--muted);
+    }
+    .settings-debug-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    button.primary {
+      font: inherit;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background: var(--accent);
+      color: #fff;
+      padding: 0.45rem 0.75rem;
+      cursor: pointer;
+    }
+    button:not(.primary):not(.theme-toggle) {
+      font: inherit;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      padding: 0.45rem 0.75rem;
+      cursor: pointer;
+    }
+    .toast {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      display: none;
+    }
+    .toast[data-visible="true"] { display: block; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-nav">
+      <h1 data-testid="settings-title">Settings</h1>
+      <a href="/" data-testid="nav-home">← Listings</a>
+    </div>
+    <button type="button" class="theme-toggle" id="btn-theme" data-testid="btn-theme" aria-label="Toggle theme">
+      <span id="theme-icon" aria-hidden="true">☀️</span>
+      <span id="theme-label">Theme</span>
+    </button>
+  </header>
+  <main>
+    <section aria-labelledby="debug-heading">
+      <h2 id="debug-heading">Client debug log</h2>
+      <p class="section-hint">
+        Session log shared with the main app (same browser tab session). Lines are also printed to the console as
+        <code>[ebay-watch][settings-debug]</code> for automation. Server-side scraper output is on the host
+        (e.g. <code>fly logs</code>), not here.
+      </p>
+      <pre id="settings-debug-log" class="settings-debug-log" data-testid="settings-debug-log" aria-live="polite"></pre>
+      <div class="settings-debug-actions">
+        <button type="button" class="primary" id="btn-settings-refresh-debug" data-testid="btn-settings-refresh-debug">Refresh debug</button>
+        <button type="button" id="btn-settings-copy-debug" data-testid="btn-settings-copy-debug">Copy log</button>
+      </div>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status" data-testid="toast"></div>
+
+  <script src="/settings-debug.js"></script>
+  <script>
+    var THEME_KEY = "ebay-watch-theme";
+    function getTheme() {
+      return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+    }
+    function setTheme(mode) {
+      var t = mode === "light" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", t);
+      try {
+        localStorage.setItem(THEME_KEY, t);
+      } catch (e) {}
+      var icon = document.getElementById("theme-icon");
+      var label = document.getElementById("theme-label");
+      var btn = document.getElementById("btn-theme");
+      if (icon && label) {
+        var isLight = t === "light";
+        icon.textContent = isLight ? "🌙" : "☀️";
+        label.textContent = isLight ? "Dark" : "Light";
+        if (btn) {
+          btn.setAttribute("aria-label", isLight ? "Switch to dark theme" : "Switch to light theme");
+        }
+      }
+    }
+    function toast(msg) {
+      var el = document.getElementById("toast");
+      if (!el) return;
+      el.textContent = msg;
+      el.dataset.visible = "true";
+      setTimeout(function () {
+        el.dataset.visible = "false";
+      }, 3200);
+    }
+    setTheme(getTheme());
+    document.getElementById("btn-theme").addEventListener("click", function () {
+      setTheme(getTheme() === "dark" ? "light" : "dark");
+    });
+
+    window.ebayWatchSettingsDebug.log("settings page load", { path: "/settings" });
+    window.ebayWatchSettingsDebug.initUI({
+      onToast: toast,
+    });
+    window.ebayWatchSettingsDebug.snapshot("settings page open");
+  </script>
+</body>
+</html>

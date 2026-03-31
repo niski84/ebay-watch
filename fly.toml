@@ -1,0 +1,46 @@
+# fly.toml app configuration file generated for ebay-watch on 2026-03-29T00:52:46-05:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'ebay-watch'
+primary_region = 'iad'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  EBAY_PW_HEADLESS = '1'
+  EBAY_WATCH_DATA_DIR = '/data'
+  PORT = '8080'
+  PLAYWRIGHT_TIMEOUT_SECS = '180'
+  EBAY_PW_BROWSER = 'chromium'
+
+
+
+[[mounts]]
+  source = 'ebay_watch_data'
+  destination = '/data'
+
+[[services]]
+  protocol = 'tcp'
+  internal_port = 8080
+
+  [[services.ports]]
+    port = 80
+    handlers = ['http']
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ['tls', 'http']
+
+  [services.concurrency]
+    type = 'connections'
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  memory = '2048mb'
+  cpu_kind = 'shared'
+  cpus = 1

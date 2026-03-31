@@ -20,7 +20,21 @@
 import * as cheerio from "cheerio";
 import { chromium, firefox } from "playwright";
 
-const argv = process.argv.slice(2);
+// Parse --min-price and --max-price flags from anywhere in argv, remove them.
+function extractFlag(args, flag) {
+  const idx = args.indexOf(flag);
+  if (idx === -1) return [args, ""];
+  const val = (args[idx + 1] || "").trim();
+  const out = [...args.slice(0, idx), ...args.slice(idx + 2)];
+  return [out, val];
+}
+
+let argv = process.argv.slice(2);
+let minPrice = "";
+let maxPrice = "";
+[argv, minPrice] = extractFlag(argv, "--min-price");
+[argv, maxPrice] = extractFlag(argv, "--max-price");
+
 const headless = process.env.EBAY_PW_HEADLESS !== "0" && process.env.EBAY_PW_HEADLESS !== "false";
 const useChromium = process.env.EBAY_PW_BROWSER === "chromium";
 const slowMo = Math.min(Math.max(parseInt(process.env.EBAY_PW_SLOWMO_MS || "0", 10) || 0, 0), 500);
@@ -53,6 +67,8 @@ if (argv[0] === "--url") {
   u.protocol = "https:";
   u.hostname = "www.ebay.com";
   u.searchParams.set("_ipg", String(limit));
+  if (minPrice) u.searchParams.set("_udlo", minPrice);
+  if (maxPrice) u.searchParams.set("_udhi", maxPrice);
   url = u.toString();
 } else {
   const q = (argv[0] || "").trim();
@@ -70,6 +86,8 @@ if (argv[0] === "--url") {
   if (conditionPipe) {
     url += `&LH_ItemCondition=${encodeURIComponent(conditionPipe)}`;
   }
+  if (minPrice) url += `&_udlo=${encodeURIComponent(minPrice)}`;
+  if (maxPrice) url += `&_udhi=${encodeURIComponent(maxPrice)}`;
 }
 
 function normalizeUrl(href) {
@@ -304,6 +322,74 @@ function extractRows($, limit) {
   );
 
   return rows;
+}
+
+/**
+ * Scrape item specifics (e.g. Shoe Width, Brand, Size) from an eBay item page.
+ * Returns a short "Key: Value · Key: Value" string for use in listing_details filtering.
+ * Handles both the newer ux-labels layout and the older itemAttr table layout.
+ */
+async function scrapeItemSpecifics(page) {
+  return page.evaluate(() => {
+    const pairs = [];
+    const seen = new Set();
+    function cleanSpecificText(s) {
+      return (s || "")
+        .replace(/\s+/g, " ")
+        // strip trailing "more", "less", "See all...", "See less" link text eBay appends
+        .replace(/\s*(more|less|see (all|less|more)[^)]*)\s*$/i, "")
+        .trim();
+    }
+    function add(k, v) {
+      k = cleanSpecificText(k).replace(/:/g, "");
+      v = cleanSpecificText(v);
+      if (!k || !v) return;
+      const key = k.toLowerCase() + ":" + v.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      pairs.push(k + ": " + v);
+    }
+
+    // Newer eBay layout: .ux-labels-values pairs
+    try {
+      document.querySelectorAll(".ux-labels-values").forEach((row) => {
+        const labels = row.querySelectorAll(".ux-labels-values__labels-content");
+        const values = row.querySelectorAll(".ux-labels-values__values-content");
+        for (let i = 0; i < labels.length && i < values.length; i++) {
+          add(labels[i].textContent, values[i].textContent);
+        }
+        if (labels.length === 0) {
+          // single label/value variant
+          const l = row.querySelector(".ux-labels-values__labels");
+          const v = row.querySelector(".ux-labels-values__values");
+          if (l && v) add(l.textContent, v.textContent);
+        }
+      });
+    } catch (_) {}
+
+    // Older eBay layout: table.itemAttr
+    try {
+      document.querySelectorAll("table.itemAttr tr").forEach((tr) => {
+        const cells = tr.querySelectorAll("td");
+        for (let i = 0; i + 1 < cells.length; i += 2) {
+          add(cells[i].textContent, cells[i + 1].textContent);
+        }
+      });
+    } catch (_) {}
+
+    // dl/dt/dd layout
+    try {
+      document.querySelectorAll(".ux-layout-section-evo dl").forEach((dl) => {
+        const dts = dl.querySelectorAll("dt");
+        const dds = dl.querySelectorAll("dd");
+        for (let i = 0; i < dts.length && i < dds.length; i++) {
+          add(dts[i].textContent, dds[i].textContent);
+        }
+      });
+    } catch (_) {}
+
+    return pairs.join(" · ");
+  }).catch(() => "");
 }
 
 async function scrapeItemPageGalleryUrls(page) {
@@ -550,7 +636,7 @@ async function enrichRowsGallery(browser, rows) {
     return;
   }
   const conc = Math.min(
-    Math.max(parseInt(process.env.EBAY_ITEM_GALLERY_CONCURRENCY || "3", 10) || 3, 1),
+    Math.max(parseInt(process.env.EBAY_ITEM_GALLERY_CONCURRENCY || "2", 10) || 2, 1),
     6,
   );
   console.error(
@@ -573,22 +659,33 @@ async function enrichRowsGallery(browser, rows) {
       const row = rows[i];
       const itemUrl = row.itemWebUrl || `https://www.ebay.com/itm/${row.itemId}`;
       try {
-        await page.goto(itemUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+        await page.goto(itemUrl, { waitUntil: "domcontentloaded", timeout: 25000 });
         await new Promise((r) => setTimeout(r, settleMs));
         await primeItemGalleryDom(page);
         await new Promise((r) => setTimeout(r, 650));
-        const raw1 = await scrapeItemPageGalleryUrls(page);
+        const [raw1, specifics] = await Promise.all([
+          scrapeItemPageGalleryUrls(page),
+          scrapeItemSpecifics(page),
+        ]);
         await primeItemGalleryDom(page);
         await new Promise((r) => setTimeout(r, 400));
         const raw2 = await scrapeItemPageGalleryUrls(page);
         const mergedRaw = [...raw1, ...raw2];
+        // Merge galleries to avoid dupes/polluted galleries
         if (mergedRaw.length) {
           row.imageUrls = mergeGalleries(row.imageUrls, mergedRaw);
           row.imageUrl = row.imageUrls[0] || row.imageUrl;
         }
+        if (specifics) {
+          row.listingDetails = [row.listingDetails, specifics].filter(Boolean).join(" · ");
+        }
       } catch (e) {
-        console.error(`[ebay-search] gallery fetch item=${row.itemId}:`, e?.message || e);
-      }
+    if (e && e.name === "TimeoutError") {
+      console.error(`[ebay-search] gallery fetch item=${row.itemId} TIMEOUT`);
+    } else {
+      console.error(`[ebay-search] gallery fetch item=${row.itemId}:`, e?.message || e);
+    }
+  }
     }
   }
 
@@ -606,8 +703,8 @@ async function loadSerpThenEnrich() {
     headless,
     ...(slowMo > 0 ? { slowMo } : {}),
     ...(useChromium
-      ? { args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"] }
-      : {}),
+      ? { args: ["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"] }
+      : { args: ["--disable-dev-shm-usage", "--no-sandbox"] }),
   });
   try {
     const page = await browser.newPage();
@@ -617,13 +714,13 @@ async function loadSerpThenEnrich() {
     console.error(
       `[ebay-search] GET ${url} engine=${useChromium ? "chromium" : "firefox"} headless=${headless} slowMo=${slowMo}`,
     );
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 120000 });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
     await page
-      .waitForSelector("ul.srp-results li.s-card, ul.srp-results li.s-item", { timeout: 90000 })
+      .waitForSelector("ul.srp-results li.s-card, ul.srp-results li.s-item", { timeout: 30000 })
       .catch(() => {});
     await new Promise((r) => setTimeout(r, 2000));
 
-    const fullHtml = await page.content();
+    const fullHtml = await page.content().catch(() => "");
     const fragment = await page.evaluate(() => {
       const root =
         document.querySelector("ul.srp-results") ||

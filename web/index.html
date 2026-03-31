@@ -82,6 +82,19 @@
       flex-shrink: 0;
       margin-left: auto;
     }
+    a.nav-settings {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.9rem;
+      padding: 0.45rem 0.65rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+    }
+    a.nav-settings:hover {
+      background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+    }
     .btn-saved-menu {
       display: inline-flex;
       align-items: center;
@@ -425,6 +438,14 @@
     .card .title { font-weight: 600; font-size: 0.95rem; }
     .card .condition-line { font-size: 0.8rem; font-weight: 600; color: var(--condition); }
     .card .details-line { font-size: 0.78rem; color: var(--muted); line-height: 1.35; }
+    .details-summary { font-size: 0.78rem; color: var(--muted); line-height: 1.35; }
+    .details-toggle {
+      background: none; border: none; padding: 0; margin: 0;
+      font: inherit; font-size: 0.72rem; color: var(--accent);
+      cursor: pointer; display: inline; vertical-align: baseline;
+    }
+    .details-toggle:hover { text-decoration: underline; }
+    .details-full { font-size: 0.78rem; color: var(--muted); line-height: 1.35; margin-top: 0.15rem; }
     .card .meta { font-size: 0.8rem; color: var(--muted); }
     .meta-search--mismatch {
       text-decoration: line-through;
@@ -432,6 +453,18 @@
       text-decoration-color: var(--muted);
       color: var(--muted);
       opacity: 0.88;
+    }
+    .meta-filter-match {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      padding: 0.05em 0.45em;
+      border-radius: 4px;
+      background: color-mix(in srgb, var(--accent) 18%, transparent);
+      color: var(--accent);
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+      vertical-align: middle;
     }
     .card .actions { margin-top: auto; display: flex; gap: 0.5rem; flex-wrap: wrap; }
     .card a { color: var(--accent); text-decoration: none; font-size: 0.85rem; }
@@ -496,6 +529,23 @@
     .cond-opt { display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; cursor: pointer; }
     .cond-opt input { width: 1rem; height: 1rem; accent-color: var(--accent); flex-shrink: 0; }
     .search-cond-line { font-size: 0.76rem; color: var(--muted); line-height: 1.35; }
+    .search-filters-edit { margin: 0; }
+    .search-filters-edit summary {
+      cursor: pointer;
+      font-size: 0.76rem;
+      color: var(--accent);
+      list-style: none;
+      padding: 0.2rem 0;
+      user-select: none;
+    }
+    .search-filters-edit summary::-webkit-details-marker { display: none; }
+    .search-filters-edit .filters-edit-inner { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 0.5rem; }
+    .search-filters-edit .filter-row { display: flex; flex-direction: column; gap: 0.2rem; }
+    .search-filters-edit label { font-size: 0.78rem; color: var(--muted); }
+    .search-filters-edit input[type="text"] { font: inherit; font-size: 0.83rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 0.3rem 0.5rem; width: 100%; }
+    .search-filters-edit .price-row { display: flex; gap: 0.5rem; }
+    .search-filters-edit .price-row input { flex: 1; min-width: 0; }
+    .search-filters-edit .btn-apply-filters { margin-top: 0.25rem; font-size: 0.85rem; }
     .search-cond-edit { margin: 0; }
     .search-cond-edit summary {
       font-size: 0.8rem;
@@ -527,6 +577,72 @@
       max-height: 8rem;
       font-family: inherit;
     }
+    .settings-panel {
+      margin-top: 1.5rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+    .settings-panel h2 {
+      margin-bottom: 0.35rem;
+    }
+    .search-row-status {
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      padding: 0.3rem 0 0.1rem;
+      line-height: 1.3;
+    }
+    .search-row-status[data-active="true"] { display: flex; }
+    .search-row-status .row-spinner {
+      width: 10px; height: 10px; flex-shrink: 0;
+      border: 1.5px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .search-row-status .row-status-msg { flex: 1; min-width: 0; }
+    .search-row-status .row-status-timer {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+    .search-row-status[data-state="done"] .row-spinner { border-color: transparent; border-top-color: transparent; animation: none; }
+    .search-row-status[data-state="done"] .row-status-timer { color: var(--muted); }
+    .search-row-status[data-state="error"] .row-spinner { border-top-color: #e55; animation: none; }
+    .search-row-status[data-state="error"] .row-status-msg { color: #e55; }
+    .poll-status {
+      display: none;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.55rem 1.25rem;
+      background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+      border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+      font-size: 0.85rem;
+      color: var(--text);
+    }
+    .poll-status[data-active="true"] {
+      display: flex;
+    }
+    .poll-spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .poll-status-text { flex: 1; min-width: 0; }
+    .poll-status-timer {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
   </style>
 </head>
 <body>
@@ -539,6 +655,7 @@
       </div>
     </div>
     <div class="header-actions">
+      <a href="/settings" class="nav-settings" data-testid="nav-settings">Settings</a>
       <button
         type="button"
         class="btn-saved-menu"
@@ -557,6 +674,11 @@
       </button>
     </div>
   </header>
+  <div class="poll-status" id="poll-status" data-active="false">
+    <span class="poll-spinner" aria-hidden="true"></span>
+    <span class="poll-status-text" id="poll-status-text">Polling…</span>
+    <span class="poll-status-timer" id="poll-status-timer">0s</span>
+  </div>
   <div
     id="searches-drawer"
     class="searches-drawer"
@@ -593,6 +715,13 @@
           </form>
           <ul id="search-list" data-testid="search-list"></ul>
           <p class="empty" id="search-empty" hidden>No searches yet. Add one above or seed <code>config/searches.md</code>.</p>
+        </section>
+        <section class="settings-panel" aria-label="Settings" data-testid="settings-panel">
+          <h2 id="settings-panel-title">Settings</h2>
+          <p class="section-hint">
+            Client debug log, health checks, and copy/export live on the
+            <a href="/settings" data-testid="link-settings-page">Settings</a> page. Log lines persist for this tab session (including when you return from Settings).
+          </p>
         </section>
       </div>
     </div>
@@ -633,8 +762,61 @@
   </div>
   <div id="toast" class="toast" role="status" data-testid="toast"></div>
 
+  <script src="/settings-debug.js"></script>
   <script>
     const log = (...args) => { console.debug("[ebay-watch]", ...args); };
+
+    // Poll status bar — live elapsed timer
+    const pollStatus = {
+      _timer: null,
+      _start: 0,
+      show(label) {
+        this._start = Date.now();
+        const el = document.getElementById("poll-status");
+        const text = document.getElementById("poll-status-text");
+        const timer = document.getElementById("poll-status-timer");
+        if (!el) return;
+        text.textContent = label || "Polling…";
+        timer.textContent = "0s";
+        el.dataset.active = "true";
+        clearInterval(this._timer);
+        this._timer = setInterval(() => {
+          const elapsed = Math.round((Date.now() - this._start) / 1000);
+          const m = Math.floor(elapsed / 60);
+          const s = elapsed % 60;
+          timer.textContent = m > 0 ? m + "m " + s + "s" : s + "s";
+        }, 1000);
+      },
+      hide(resultLabel) {
+        clearInterval(this._timer);
+        this._timer = null;
+        const el = document.getElementById("poll-status");
+        const text = document.getElementById("poll-status-text");
+        const timer = document.getElementById("poll-status-timer");
+        if (!el) return;
+        if (resultLabel) {
+          const elapsed = Math.round((Date.now() - this._start) / 1000);
+          const m = Math.floor(elapsed / 60);
+          const sec = elapsed % 60;
+          text.textContent = resultLabel;
+          timer.textContent = m > 0 ? m + "m " + sec + "s" : sec + "s";
+          // Keep visible briefly to show result
+          setTimeout(() => { el.dataset.active = "false"; }, 3000);
+        } else {
+          el.dataset.active = "false";
+        }
+      },
+    };
+
+    const dbg = window.ebayWatchSettingsDebug;
+
+    function settingsDebugLog(message, detail) {
+      dbg.log(message, detail);
+    }
+
+    async function settingsDebugSnapshot(reason) {
+      await dbg.snapshot(reason, { getSearchesCount: () => (cachedSearches || []).length });
+    }
 
     const SORT_LS_KEY = "ebay-watch-listings-sort";
     let cachedSearches = [];
@@ -680,6 +862,8 @@
         menuBtn.setAttribute("aria-expanded", "true");
       }
       log("searches menu open", { count: (cachedSearches || []).length });
+      settingsDebugLog("Saved searches drawer opened");
+      settingsDebugSnapshot("drawer-open health check");
       const closeBtn = document.getElementById("btn-close-searches-drawer");
       window.setTimeout(() => {
         (closeBtn || document.getElementById("searches-drawer-panel"))?.focus?.();
@@ -708,6 +892,14 @@
         }
       }
       searchesMenuPreviousFocus = null;
+    }
+
+    function initSettingsDebugPanel() {
+      dbg.log("page boot", { build: "ebay-watch-ui", page: "/" });
+      dbg.initUI({
+        getSearchesCount: () => (cachedSearches || []).length,
+        onToast: toast,
+      });
     }
 
     function initSearchesMenu() {
@@ -1000,6 +1192,121 @@
       return hits >= need;
     }
 
+    /**
+     * Extracts the most useful tokens from listing_details for the summary line.
+     * Prefers: width markers, size, condition-ish words, price hints.
+     * Falls back to the first ~60 chars.
+     */
+    function buildDetailsLine(it) {
+      const raw = (it.listing_details || "").trim();
+      if (!raw) return null;
+
+      const parts = raw.split(/\s*·\s*/).map((p) => p.trim()).filter(Boolean);
+      const facts = [];
+      const seen = new Set();
+      function add(label, value) {
+        const key = label.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        facts.push(label + ": " + value);
+      }
+
+      for (const p of parts) {
+        // Size — "Size L", "Size 2XL", "US M 10", "US W 8"
+        if (/^(Size\s|US\s)/i.test(p) && p.length < 30) {
+          add("Size", p.replace(/^Size\s*/i, "").trim());
+          continue;
+        }
+        // Shipping cost + method — extract price and carrier name
+        if (/^Shipping:/i.test(p)) {
+          const m = p.match(/(?:US\s*)?\$([\d.]+)/);
+          const carrier = p.match(/(?:USPS|UPS|FedEx|DHL)[\w\s®]*?(?:\.|,|$)/i);
+          if (m) {
+            const method = carrier ? carrier[0].replace(/[.,]+$/, "").trim() : "";
+            add("Shipping", "$" + m[1] + (method ? " " + method : ""));
+          } else if (/free/i.test(p)) {
+            const carrier2 = p.match(/(?:USPS|UPS|FedEx|DHL)[\w\s®]*?(?:\.|,|$)/i);
+            add("Shipping", "Free" + (carrier2 ? " " + carrier2[0].replace(/[.,]+$/, "").trim() : ""));
+          }
+          continue;
+        }
+        // Condition — "Condition: New with box: This item is..."
+        if (/^Condition:/i.test(p)) {
+          let c = p.replace(/^Condition:\s*/i, "");
+          // Take just the label before the long description
+          const colon = c.indexOf(":");
+          if (colon > 0 && colon < 30) c = c.substring(0, colon).trim();
+          add("Condition", c);
+          continue;
+        }
+        // Short key: value specifics — Shoe Width, Brand, Color, Department, Model
+        const kv = p.match(/^(Shoe Width|Width|Brand|Color|Colour|Department|Model|Type|Style)\s*:\s*(.+)/i);
+        if (kv) {
+          const v = kv[2].trim();
+          if (v.length < 40) add(kv[1], v);
+          continue;
+        }
+      }
+
+      if (facts.length === 0) {
+        // Fallback: show first short part
+        const first = parts.find((p) => p.length < 40);
+        if (first) facts.push(first);
+      }
+
+      if (facts.length === 0) return null;
+
+      // Cap at ~30 words
+      let text = facts.join(" · ");
+      const words = text.split(/\s+/);
+      if (words.length > 30) text = words.slice(0, 30).join(" ") + "…";
+
+      const el = document.createElement("div");
+      el.className = "details-summary";
+      el.textContent = text;
+      return el;
+    }
+
+    function filterTermMatches(haystack, term) {
+      if (!term) return false;
+      // multi-word / contains spaces or colons → plain substring (context is specific enough)
+      if (/[ \t:/\-]/.test(term)) return haystack.includes(term);
+      // single token → require word boundaries so "ee" doesn't match inside "see" or "green"
+      try {
+        return new RegExp("\\b" + term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i").test(haystack);
+      } catch (_) {
+        return haystack.includes(term);
+      }
+    }
+
+    function itemPassesExcludeFilter(it) {
+      const search = (cachedSearches || []).find((s) => s.id === it.search_id);
+      if (!search) return true;
+      const filter = (search.exclude_filter || "").trim();
+      if (!filter) return true;
+      const terms = filter.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+      if (terms.length === 0) return true;
+      const haystack = [(it.title || ""), (it.listing_details || "")].join(" ").toLowerCase();
+      for (const t of terms) {
+        if (filterTermMatches(haystack, t)) return false;
+      }
+      return true;
+    }
+
+    function findTitleFilterMatch(it) {
+      const search = (cachedSearches || []).find((s) => s.id === it.search_id);
+      if (!search) return null;
+      const filter = (search.title_filter || "").trim();
+      if (!filter) return null;
+      const terms = filter.split(/[,\s]+/).map((t) => t.trim().toLowerCase()).filter(Boolean);
+      if (terms.length === 0) return null;
+      const haystack = [(it.title || ""), (it.listing_details || "")].join(" ").toLowerCase();
+      for (const t of terms) {
+        if (filterTermMatches(haystack, t)) return t.toUpperCase();
+      }
+      return null;
+    }
+
     function buildListingMeta(it) {
       const meta = document.createElement("div");
       meta.className = "meta";
@@ -1015,6 +1322,15 @@
         }
         span.textContent = q;
         meta.appendChild(span);
+        const matchedTerm = findTitleFilterMatch(it);
+        if (matchedTerm) {
+          meta.appendChild(document.createTextNode(" "));
+          const badge = document.createElement("span");
+          badge.className = "meta-filter-match";
+          badge.textContent = matchedTerm;
+          badge.title = "Matched your width/title filter";
+          meta.appendChild(badge);
+        }
       }
       if (price) {
         if (q) {
@@ -1179,7 +1495,7 @@
       const empty = document.getElementById("items-empty");
       grid.innerHTML = "";
       const items = sortListings(lastListingItems, getSortMode()).filter((it) =>
-        passesWideShoeSearchFilter(it),
+        passesWideShoeSearchFilter(it) && itemPassesExcludeFilter(it),
       );
       empty.hidden = items.length > 0;
       for (const it of items) {
@@ -1278,12 +1594,8 @@
           cond.textContent = it.condition;
           body.appendChild(cond);
         }
-        if (it.listing_details) {
-          const det = document.createElement("div");
-          det.className = "details-line";
-          det.textContent = it.listing_details;
-          body.appendChild(det);
-        }
+        const detEl = buildDetailsLine(it);
+        if (detEl) body.appendChild(detEl);
         body.appendChild(meta);
         body.appendChild(actions);
         card.appendChild(body);
@@ -1471,6 +1783,105 @@
           main.appendChild(det);
         }
 
+        // Title filter + price range editor (available for all search types)
+        {
+          const det = document.createElement("details");
+          det.className = "search-filters-edit";
+          const sum = document.createElement("summary");
+          const hasFilters = (s.title_filter || "").trim() || (s.exclude_filter || "").trim() || (s.min_price || "").trim() || (s.max_price || "").trim();
+          sum.textContent = hasFilters ? "Edit search / filters ✦" : "Edit search / filters";
+          det.appendChild(sum);
+          const inner = document.createElement("div");
+          inner.className = "filters-edit-inner";
+
+          // Query edit (keyword searches only)
+          if (!(s.ebay_search_url || "").trim()) {
+            const qRow = document.createElement("div");
+            qRow.className = "filter-row";
+            const qLabel = document.createElement("label");
+            qLabel.textContent = "Search keywords";
+            const qInput = document.createElement("input");
+            qInput.type = "text";
+            qInput.value = s.query || "";
+            qInput.placeholder = "eBay search keywords";
+            qRow.appendChild(qLabel);
+            qRow.appendChild(qInput);
+            inner.appendChild(qRow);
+            inner._qInput = qInput;
+          }
+
+          const tfRow = document.createElement("div");
+          tfRow.className = "filter-row";
+          const tfLabel = document.createElement("label");
+          tfLabel.textContent = "Must contain (any one, comma-separated)";
+          const tfInput = document.createElement("input");
+          tfInput.type = "text";
+          tfInput.value = s.title_filter || "";
+          tfInput.placeholder = "e.g. 2E, Wide, 4E";
+          tfRow.appendChild(tfLabel);
+          tfRow.appendChild(tfInput);
+          inner.appendChild(tfRow);
+
+          const exRow = document.createElement("div");
+          exRow.className = "filter-row";
+          const exLabel = document.createElement("label");
+          exLabel.textContent = "Exclude if contains (any one, comma-separated)";
+          const exInput = document.createElement("input");
+          exInput.type = "text";
+          exInput.value = s.exclude_filter || "";
+          exInput.placeholder = "e.g. Shoe Width: D, Shoe Width: B";
+          exRow.appendChild(exLabel);
+          exRow.appendChild(exInput);
+          inner.appendChild(exRow);
+
+          const prRow = document.createElement("div");
+          prRow.className = "filter-row";
+          const prLabel = document.createElement("label");
+          prLabel.textContent = "Price range (USD)";
+          const priceWrap = document.createElement("div");
+          priceWrap.className = "price-row";
+          const minInput = document.createElement("input");
+          minInput.type = "text";
+          minInput.value = s.min_price || "";
+          minInput.placeholder = "Min $";
+          const maxInput = document.createElement("input");
+          maxInput.type = "text";
+          maxInput.value = s.max_price || "";
+          maxInput.placeholder = "Max $";
+          priceWrap.appendChild(minInput);
+          priceWrap.appendChild(maxInput);
+          prRow.appendChild(prLabel);
+          prRow.appendChild(priceWrap);
+          inner.appendChild(prRow);
+
+          const applyBtn = document.createElement("button");
+          applyBtn.type = "button";
+          applyBtn.className = "btn-apply-filters";
+          applyBtn.textContent = "Apply";
+          applyBtn.addEventListener("click", async (ev) => {
+            ev.preventDefault();
+            try {
+              const patch = {
+                title_filter: tfInput.value.trim(),
+                exclude_filter: exInput.value.trim(),
+                min_price: minInput.value.trim(),
+                max_price: maxInput.value.trim(),
+              };
+              if (inner._qInput) patch.query = inner._qInput.value.trim();
+              await api("PATCH", "/api/searches?id=" + encodeURIComponent(s.id), patch);
+              toast("Search updated");
+              det.open = false;
+              await refreshAll();
+            } catch (err) {
+              console.error("[ebay-watch] filters patch failed", err);
+              toast(err.message || "Update failed");
+            }
+          });
+          inner.appendChild(applyBtn);
+          det.appendChild(inner);
+          main.appendChild(det);
+        }
+
         cb.addEventListener("change", async () => {
           const want = cb.checked;
           try {
@@ -1499,13 +1910,26 @@
         pollOne.addEventListener("click", async (ev) => {
           ev.preventDefault();
           pollOne.disabled = true;
+          const q = (s.query || "").trim();
+          rowStatusShow('Searching "' + (q.length > 45 ? q.slice(0, 45) + "…" : q) + '"');
+          pollStatus.show("Polling: " + (q.length > 50 ? q.slice(0, 50) + "…" : q));
+          settingsDebugLog("Poll one started", { searchId: s.id, query: q.slice(0, 120) });
           try {
             await api("POST", "/api/poll?search_id=" + encodeURIComponent(s.id));
-            const q = (s.query || "").trim();
-            toast(q.length > 36 ? "Updated search" : "Updated: " + q);
+            settingsDebugLog("Poll one finished OK", { searchId: s.id });
+            rowStatusDone("Complete", "done");
+            pollStatus.hide("Done: " + (q.length > 40 ? q.slice(0, 40) + "…" : q));
             await refreshAll();
           } catch (e) {
             console.error("[ebay-watch] poll one failed", e);
+            settingsDebugLog("Poll one failed", {
+              searchId: s.id,
+              message: e && e.message,
+              status: e && e.status,
+              data: e && e.data,
+            });
+            rowStatusDone(e.message || "Failed", "error");
+            pollStatus.hide("Failed: " + (q.length > 40 ? q.slice(0, 40) + "…" : q));
             toast(e.message || "Poll failed");
           } finally {
             pollOne.disabled = false;
@@ -1527,8 +1951,45 @@
             toast(e.message || "Remove failed");
           }
         });
+        // Per-row poll status
+        const rowStatus = document.createElement("div");
+        rowStatus.className = "search-row-status";
+        rowStatus.dataset.active = "false";
+        rowStatus.dataset.state = "idle";
+        rowStatus.innerHTML =
+          '<span class="row-spinner" aria-hidden="true"></span>' +
+          '<span class="row-status-msg"></span>' +
+          '<span class="row-status-timer"></span>';
+        const rowStatusMsg = rowStatus.querySelector(".row-status-msg");
+        const rowStatusTimer = rowStatus.querySelector(".row-status-timer");
+
+        let rowTimerInterval = null;
+        function rowStatusShow(label) {
+          const start = Date.now();
+          rowStatus.dataset.active = "true";
+          rowStatus.dataset.state = "running";
+          rowStatusMsg.textContent = label;
+          rowStatusTimer.textContent = "0s";
+          clearInterval(rowTimerInterval);
+          rowStatus._start = start;
+          rowTimerInterval = setInterval(() => {
+            const e = Math.round((Date.now() - start) / 1000);
+            rowStatusTimer.textContent = e >= 60 ? Math.floor(e/60) + "m " + (e%60) + "s" : e + "s";
+          }, 1000);
+        }
+        function rowStatusDone(msg, state) {
+          clearInterval(rowTimerInterval);
+          const elapsed = Math.round((Date.now() - (rowStatus._start || Date.now())) / 1000);
+          rowStatus.dataset.state = state || "done";
+          rowStatusMsg.textContent = msg;
+          rowStatusTimer.textContent = elapsed >= 60 ? Math.floor(elapsed/60) + "m " + (elapsed%60) + "s" : elapsed + "s";
+          // Fade out after a pause
+          setTimeout(() => { rowStatus.dataset.active = "false"; rowStatus.dataset.state = "idle"; }, 5000);
+        }
+
         rowActions.appendChild(pollOne);
         rowActions.appendChild(btn);
+        main.appendChild(rowStatus);
         li.appendChild(main);
         li.appendChild(rowActions);
         ul.appendChild(li);
@@ -1558,12 +2019,23 @@
     document.getElementById("btn-poll").addEventListener("click", async () => {
       const btn = document.getElementById("btn-poll");
       btn.disabled = true;
+      const count = (cachedSearches || []).filter((s) => s.enabled !== false).length;
+      pollStatus.show("Polling all " + count + " searches…");
+      settingsDebugLog("Poll now started (all searches)");
       try {
         await api("POST", "/api/poll");
+        settingsDebugLog("Poll now finished OK");
+        pollStatus.hide("Poll complete");
         toast("Poll finished");
         await refreshAll();
       } catch (e) {
         console.error("[ebay-watch] poll failed", e);
+        settingsDebugLog("Poll now failed", {
+          message: e && e.message,
+          status: e && e.status,
+          data: e && e.data,
+        });
+        pollStatus.hide("Poll failed");
         toast(e.message || "Poll failed");
       } finally {
         btn.disabled = false;
@@ -1590,6 +2062,7 @@
     });
 
     populateCondOpts(document.getElementById("cond-opts-add"));
+    initSettingsDebugPanel();
     initSearchesMenu();
     initThemeToggle();
     initLightbox();

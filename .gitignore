@@ -9,3 +9,4 @@ server.log
 server.pid
 data/
 node_modules/
+.env.fly

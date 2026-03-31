@@ -24,6 +24,14 @@ go build -o "$BINARY" ./cmd/ebay-watch
 echo "  Build OK: $BINARY"
 
 echo "→ Starting ebay-watch..."
+# ── vault: pull fresh secrets from Infisical before sourcing .env ─────────────
+_VAULT_SYNC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd ../../infrastructure && pwd)/sync-secrets.sh"
+if [[ -f "$_VAULT_SYNC" ]] && [[ -n "${INFISICAL_CLIENT_ID:-}" ]]; then
+  echo "→ Pulling secrets from vault (ebay-watch)..."
+  "$_VAULT_SYNC" --pull ebay-watch 2>/dev/null || echo "  ⚠  Vault pull skipped (using cached .env)"
+fi
+# ─────────────────────────────────────────────────────────────────────────────
+
 if [ -f "$PROJECT_DIR/.env" ]; then
     set -a
     # shellcheck disable=SC1090

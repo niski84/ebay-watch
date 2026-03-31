@@ -11,6 +11,10 @@ type SearchSpec struct {
 	Keywords      string
 	ItemCondition string // LH_ItemCondition value when using keyword mode (may be pipe-separated codes)
 	EbayURL       string
+	TitleFilter   string // comma/space-separated keywords; at least one must appear in title+details (post-fetch)
+	ExcludeFilter string // comma/space-separated phrases; if any found in title+details the listing is dropped
+	MinPrice      string // minimum price (USD); appended as _udlo to eBay URL
+	MaxPrice      string // maximum price (USD); appended as _udhi to eBay URL
 }
 
 // Validate ensures the spec can run a search.

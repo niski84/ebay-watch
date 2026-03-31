@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -36,15 +38,34 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/reject", s.handleReject)
 	mux.HandleFunc("/api/seen", s.handleSeen)
 	mux.HandleFunc("/api/poll", s.handlePoll)
+	mux.HandleFunc("/settings", s.handleSettingsPage)
 
 	fs := http.FileServer(http.Dir(s.cfg.WebDir))
 	mux.Handle("/", fs)
-	return logRequests(mux)
+	return logRequests(basicAuth(mux))
 }
 
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("[API] %s %s\n", r.Method, r.URL.Path)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func basicAuth(next http.Handler) http.Handler {
+	user := os.Getenv("HTTP_AUTH_USER")
+	pass := os.Getenv("HTTP_AUTH_PASS")
+	if user == "" && pass == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, p, ok := r.BasicAuth()
+		if !ok || u != user || p != pass {
+			w.Header().Set("WWW-Authenticate", `Basic realm="ebay-watch"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorized\n"))
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -64,6 +85,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"success": true, "status": "ok", "service": "ebay-watch",
 		"fetch": s.fetchMode,
 	})
+}
+
+func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "method not allowed"})
+		return
+	}
+	path := filepath.Join(s.cfg.WebDir, "settings.html")
+	http.ServeFile(w, r, path)
 }
 
 func (s *Server) handleSearches(w http.ResponseWriter, r *http.Request) {
@@ -150,13 +180,18 @@ func (s *Server) handleSearches(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			ShowInResults  *bool     `json:"show_in_results"`
 			ItemConditions *[]string `json:"item_conditions"`
+			TitleFilter    *string   `json:"title_filter"`
+			ExcludeFilter  *string   `json:"exclude_filter"`
+			MinPrice       *string   `json:"min_price"`
+			MaxPrice       *string   `json:"max_price"`
+			Query          *string   `json:"query"`
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
 			respondJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "invalid json"})
 			return
 		}
-		if body.ShowInResults == nil && body.ItemConditions == nil {
-			respondJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "show_in_results or item_conditions required"})
+		if body.ShowInResults == nil && body.ItemConditions == nil && body.TitleFilter == nil && body.ExcludeFilter == nil && body.MinPrice == nil && body.MaxPrice == nil && body.Query == nil {
+			respondJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "no fields to update"})
 			return
 		}
 		if body.ItemConditions != nil {
@@ -196,6 +231,81 @@ func (s *Server) handleSearches(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				fmt.Printf("[API] PATCH /api/searches show_in_results err=%v\n", err)
+				respondJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": err.Error()})
+				return
+			}
+		}
+		if body.TitleFilter != nil {
+			if err := s.store.SetSearchTitleFilter(id, *body.TitleFilter); err != nil {
+				if errors.Is(err, store.ErrSearchNotFound) {
+					respondJSON(w, http.StatusNotFound, map[string]any{"success": false, "error": err.Error()})
+					return
+				}
+				fmt.Printf("[API] PATCH /api/searches title_filter err=%v\n", err)
+				respondJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": err.Error()})
+				return
+			}
+		}
+		if body.MinPrice != nil || body.MaxPrice != nil {
+			minP := ""
+			maxP := ""
+			if body.MinPrice != nil {
+				minP = *body.MinPrice
+			}
+			if body.MaxPrice != nil {
+				maxP = *body.MaxPrice
+			}
+			// fetch current values if only one side is being set
+			if body.MinPrice == nil || body.MaxPrice == nil {
+				sr, err := s.store.GetSearch(id)
+				if err != nil {
+					if errors.Is(err, store.ErrSearchNotFound) {
+						respondJSON(w, http.StatusNotFound, map[string]any{"success": false, "error": err.Error()})
+						return
+					}
+					respondJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": err.Error()})
+					return
+				}
+				if body.MinPrice == nil {
+					minP = sr.MinPrice
+				}
+				if body.MaxPrice == nil {
+					maxP = sr.MaxPrice
+				}
+			}
+			if err := s.store.SetSearchPriceRange(id, minP, maxP); err != nil {
+				if errors.Is(err, store.ErrSearchNotFound) {
+					respondJSON(w, http.StatusNotFound, map[string]any{"success": false, "error": err.Error()})
+					return
+				}
+				fmt.Printf("[API] PATCH /api/searches price_range err=%v\n", err)
+				respondJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": err.Error()})
+				return
+			}
+		}
+		if body.ExcludeFilter != nil {
+			if err := s.store.SetSearchExcludeFilter(id, *body.ExcludeFilter); err != nil {
+				if errors.Is(err, store.ErrSearchNotFound) {
+					respondJSON(w, http.StatusNotFound, map[string]any{"success": false, "error": err.Error()})
+					return
+				}
+				fmt.Printf("[API] PATCH /api/searches exclude_filter err=%v\n", err)
+				respondJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": err.Error()})
+				return
+			}
+		}
+		if body.Query != nil {
+			q := strings.TrimSpace(*body.Query)
+			if q == "" {
+				respondJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "query cannot be empty"})
+				return
+			}
+			if err := s.store.SetSearchQuery(id, q); err != nil {
+				if errors.Is(err, store.ErrSearchNotFound) {
+					respondJSON(w, http.StatusNotFound, map[string]any{"success": false, "error": err.Error()})
+					return
+				}
+				fmt.Printf("[API] PATCH /api/searches query err=%v\n", err)
 				respondJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": err.Error()})
 				return
 			}

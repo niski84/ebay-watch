@@ -16,4 +16,7 @@ echo "  ✓ /api/searches"
 curl -fsS "${BASE}/api/items" | tee /dev/null
 echo "  ✓ /api/items"
 
+curl -fsS "${BASE}/settings" | grep -q "settings-debug.js" || { echo "  ✗ /settings missing settings-debug.js"; exit 1; }
+echo "  ✓ /settings (settings page)"
+
 echo "=== all checks passed ==="

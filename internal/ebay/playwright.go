@@ -80,12 +80,21 @@ func (p *Playwright) Search(spec SearchSpec) ([]Item, error) {
 			args = append(args, pipe)
 		}
 	}
+	if v := strings.TrimSpace(spec.MinPrice); v != "" {
+		args = append(args, "--min-price", v)
+	}
+	if v := strings.TrimSpace(spec.MaxPrice); v != "" {
+		args = append(args, "--max-price", v)
+	}
 
 	cmd := exec.CommandContext(ctx, p.node, args...)
 	cmd.Env = playwrightEnv()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if len(stderr.Bytes()) > 0 {
+		fmt.Printf("[Playwright] %s\n", stderr.String())
+	}
 	if err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {

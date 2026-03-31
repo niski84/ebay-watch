@@ -22,6 +22,10 @@ type Search struct {
 	ItemConditionFilter string     `json:"item_condition_filter"`
 	ItemConditions      []string   `json:"item_conditions,omitempty"`
 	EbaySearchURL       string     `json:"ebay_search_url,omitempty"`
+	TitleFilter         string     `json:"title_filter,omitempty"`
+	ExcludeFilter       string     `json:"exclude_filter,omitempty"`
+	MinPrice            string     `json:"min_price,omitempty"`
+	MaxPrice            string     `json:"max_price,omitempty"`
 	CreatedAt           time.Time  `json:"created_at"`
 	LastPolledAt        *time.Time `json:"last_polled_at,omitempty"`
 }
@@ -131,7 +135,10 @@ CREATE TABLE IF NOT EXISTS rejects (
 	if err := s.migrateItemSeen(); err != nil {
 		return err
 	}
-	return s.migrateSearchesV2()
+	if err := s.migrateSearchesV2(); err != nil {
+		return err
+	}
+	return s.migrateSearchFiltersV3()
 }
 
 func (s *Store) migrateSearchesV2() error {
@@ -206,6 +213,23 @@ FROM searches`); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *Store) migrateSearchFiltersV3() error {
+	for _, q := range []string{
+		`ALTER TABLE searches ADD COLUMN title_filter TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE searches ADD COLUMN exclude_filter TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE searches ADD COLUMN min_price TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE searches ADD COLUMN max_price TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			msg := strings.ToLower(err.Error())
+			if !strings.Contains(msg, "duplicate column") {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Store) migrateItemSeen() error {
@@ -334,9 +358,9 @@ func (s *Store) GetSearch(id int64) (*Search, error) {
 	var lastPolled sql.NullString
 	var en, sir int
 	err := s.db.QueryRow(`
-SELECT id, query, enabled, IFNULL(show_in_results, 1), IFNULL(item_condition_filter, ''), IFNULL(ebay_search_url, ''), created_at, last_polled_at
+SELECT id, query, enabled, IFNULL(show_in_results, 1), IFNULL(item_condition_filter, ''), IFNULL(ebay_search_url, ''), IFNULL(title_filter, ''), IFNULL(exclude_filter, ''), IFNULL(min_price, ''), IFNULL(max_price, ''), created_at, last_polled_at
 FROM searches WHERE id = ?`, id,
-	).Scan(&se.ID, &se.Query, &en, &sir, &se.ItemConditionFilter, &se.EbaySearchURL, &created, &lastPolled)
+	).Scan(&se.ID, &se.Query, &en, &sir, &se.ItemConditionFilter, &se.EbaySearchURL, &se.TitleFilter, &se.ExcludeFilter, &se.MinPrice, &se.MaxPrice, &created, &lastPolled)
 	if err == sql.ErrNoRows {
 		return nil, ErrSearchNotFound
 	}
@@ -363,7 +387,7 @@ FROM searches WHERE id = ?`, id,
 // ListSearches returns all saved searches.
 func (s *Store) ListSearches() ([]Search, error) {
 	rows, err := s.db.Query(`
-SELECT id, query, enabled, IFNULL(show_in_results, 1), IFNULL(item_condition_filter, ''), IFNULL(ebay_search_url, ''), created_at, last_polled_at
+SELECT id, query, enabled, IFNULL(show_in_results, 1), IFNULL(item_condition_filter, ''), IFNULL(ebay_search_url, ''), IFNULL(title_filter, ''), IFNULL(exclude_filter, ''), IFNULL(min_price, ''), IFNULL(max_price, ''), created_at, last_polled_at
 FROM searches ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -378,7 +402,7 @@ FROM searches ORDER BY id`)
 			en         int
 			sir        int
 		)
-		if err := rows.Scan(&se.ID, &se.Query, &en, &sir, &se.ItemConditionFilter, &se.EbaySearchURL, &created, &lastPolled); err != nil {
+		if err := rows.Scan(&se.ID, &se.Query, &en, &sir, &se.ItemConditionFilter, &se.EbaySearchURL, &se.TitleFilter, &se.ExcludeFilter, &se.MinPrice, &se.MaxPrice, &created, &lastPolled); err != nil {
 			return nil, err
 		}
 		se.Enabled = en != 0
@@ -452,6 +476,75 @@ func (s *Store) SetSearchShowInResults(id int64, show bool) error {
 // SetSearchItemConditionFilter sets the eBay LH_ItemCondition pipe string (empty = any condition).
 func (s *Store) SetSearchItemConditionFilter(id int64, itemConditionFilter string) error {
 	res, err := s.db.Exec(`UPDATE searches SET item_condition_filter = ? WHERE id = ?`, itemConditionFilter, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrSearchNotFound
+	}
+	return nil
+}
+
+// SetSearchTitleFilter sets the title keyword filter (comma/space-separated; any term must match).
+func (s *Store) SetSearchTitleFilter(id int64, filter string) error {
+	res, err := s.db.Exec(`UPDATE searches SET title_filter = ? WHERE id = ?`, strings.TrimSpace(filter), id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrSearchNotFound
+	}
+	return nil
+}
+
+// SetSearchPriceRange sets the min/max price filter (empty string = no limit).
+func (s *Store) SetSearchPriceRange(id int64, minPrice, maxPrice string) error {
+	res, err := s.db.Exec(`UPDATE searches SET min_price = ?, max_price = ? WHERE id = ?`,
+		strings.TrimSpace(minPrice), strings.TrimSpace(maxPrice), id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrSearchNotFound
+	}
+	return nil
+}
+
+// SetSearchExcludeFilter sets terms that, if found in title/details, cause the listing to be dropped.
+func (s *Store) SetSearchExcludeFilter(id int64, filter string) error {
+	res, err := s.db.Exec(`UPDATE searches SET exclude_filter = ? WHERE id = ?`, strings.TrimSpace(filter), id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrSearchNotFound
+	}
+	return nil
+}
+
+// SetSearchQuery updates the keyword query for a search (keyword-mode only).
+func (s *Store) SetSearchQuery(id int64, query string) error {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return fmt.Errorf("query cannot be empty")
+	}
+	res, err := s.db.Exec(`UPDATE searches SET query = ? WHERE id = ?`, query, id)
 	if err != nil {
 		return err
 	}
@@ -549,7 +642,8 @@ ON CONFLICT(search_id, ebay_item_id) DO UPDATE SET
 	return err
 }
 
-// ListVisibleListings returns cached items excluding globally rejected ids.
+// ListVisibleListings returns cached items excluding globally rejected ids and
+// items matching any search-level exclude_filter.
 func (s *Store) ListVisibleListings() ([]Listing, error) {
 	rows, err := s.db.Query(`
 SELECT l.ebay_item_id, l.search_id, s.query, l.title, IFNULL(l.item_condition, ''), IFNULL(l.listing_details, ''),
@@ -565,7 +659,54 @@ ORDER BY l.fetched_at DESC, l.id DESC
 		return nil, err
 	}
 	defer rows.Close()
-	return scanListings(rows)
+	all, err := scanListings(rows)
+	if err != nil {
+		return nil, err
+	}
+	// Build a map of search_id → exclude terms
+	searches, err := s.ListSearches()
+	if err != nil {
+		return all, nil // degrade gracefully
+	}
+	excludeBySearch := make(map[int64][]string)
+	for _, se := range searches {
+		ef := strings.TrimSpace(se.ExcludeFilter)
+		if ef == "" {
+			continue
+		}
+		var terms []string
+		for _, t := range strings.Split(ef, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				terms = append(terms, strings.ToLower(t))
+			}
+		}
+		if len(terms) > 0 {
+			excludeBySearch[se.ID] = terms
+		}
+	}
+	if len(excludeBySearch) == 0 {
+		return all, nil
+	}
+	filtered := make([]Listing, 0, len(all))
+	for _, l := range all {
+		terms, ok := excludeBySearch[l.SearchID]
+		if !ok {
+			filtered = append(filtered, l)
+			continue
+		}
+		haystack := strings.ToLower(l.Title + " " + l.ListingDetails)
+		excluded := false
+		for _, t := range terms {
+			if strings.Contains(haystack, t) {
+				excluded = true
+				break
+			}
+		}
+		if !excluded {
+			filtered = append(filtered, l)
+		}
+	}
+	return filtered, nil
 }
 
 func scanListings(rows *sql.Rows) ([]Listing, error) {
@@ -607,7 +748,7 @@ func (s *Store) TotalSearchRows() (int, error) {
 // ListEnabledSearches returns id and query for polling.
 func (s *Store) ListEnabledSearches() ([]Search, error) {
 	rows, err := s.db.Query(`
-SELECT id, query, enabled, IFNULL(show_in_results, 1), IFNULL(item_condition_filter, ''), IFNULL(ebay_search_url, ''), created_at, last_polled_at
+SELECT id, query, enabled, IFNULL(show_in_results, 1), IFNULL(item_condition_filter, ''), IFNULL(ebay_search_url, ''), IFNULL(title_filter, ''), IFNULL(exclude_filter, ''), IFNULL(min_price, ''), IFNULL(max_price, ''), created_at, last_polled_at
 FROM searches WHERE enabled = 1 ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -622,7 +763,7 @@ FROM searches WHERE enabled = 1 ORDER BY id`)
 			en         int
 			sir        int
 		)
-		if err := rows.Scan(&se.ID, &se.Query, &en, &sir, &se.ItemConditionFilter, &se.EbaySearchURL, &created, &lastPolled); err != nil {
+		if err := rows.Scan(&se.ID, &se.Query, &en, &sir, &se.ItemConditionFilter, &se.EbaySearchURL, &se.TitleFilter, &se.ExcludeFilter, &se.MinPrice, &se.MaxPrice, &created, &lastPolled); err != nil {
 			return nil, err
 		}
 		se.Enabled = en != 0
