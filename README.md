@@ -2,6 +2,8 @@
 
 Local dashboard for eBay saved searches: polls the public search results page (Playwright + Node scraper, no official API), stores listings in SQLite, and serves a small web UI.
 
+**Live:** [https://ebay-watch.fly.dev/](https://ebay-watch.fly.dev/)
+
 ## Quick start
 
 ```bash
