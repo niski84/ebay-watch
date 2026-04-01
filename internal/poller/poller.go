@@ -153,7 +153,7 @@ func RunPoll(ctx context.Context, st *store.Store, search ebay.Searcher) error {
 			select {
 			case <-ctx.Done():
 				return errors.Join(append(errs, ctx.Err())...)
-			case <-time.After(20 * time.Second):
+			case <-time.After(60 * time.Second):
 			}
 		}
 		if err := pollSearch(ctx, st, search, se); err != nil {
