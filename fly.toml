@@ -13,8 +13,7 @@ primary_region = 'iad'
   EBAY_PW_HEADLESS = '1'
   EBAY_WATCH_DATA_DIR = '/data'
   PORT = '8080'
-  PLAYWRIGHT_TIMEOUT_SECS = '180'
-  EBAY_PW_BROWSER = 'chromium'
+  PLAYWRIGHT_TIMEOUT_SECS = '300'
 
 
 
