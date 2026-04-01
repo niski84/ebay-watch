@@ -14,6 +14,7 @@ primary_region = 'iad'
   EBAY_WATCH_DATA_DIR = '/data'
   PORT = '8080'
   PLAYWRIGHT_TIMEOUT_SECS = '300'
+  EBAY_SKIP_ITEM_GALLERY = '1'
 
 
 
