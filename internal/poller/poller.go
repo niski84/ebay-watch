@@ -140,13 +140,22 @@ func applyTitleFilter(items []ebay.Item, filter string) []ebay.Item {
 }
 
 // RunPoll loads enabled searches, queries eBay for each, and upserts listing rows.
+// A 20-second delay between searches lets Firefox fully exit, frees memory, and
+// avoids eBay rate-limiting consecutive headless requests from the same IP.
 func RunPoll(ctx context.Context, st *store.Store, search ebay.Searcher) error {
 	searches, err := st.ListEnabledSearches()
 	if err != nil {
 		return err
 	}
 	var errs []error
-	for _, se := range searches {
+	for i, se := range searches {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return errors.Join(append(errs, ctx.Err())...)
+			case <-time.After(20 * time.Second):
+			}
+		}
 		if err := pollSearch(ctx, st, search, se); err != nil {
 			errs = append(errs, err)
 		}
