@@ -52,15 +52,30 @@ func logRequests(next http.Handler) http.Handler {
 	})
 }
 
+// basicAuth builds a credentials map from:
+//   - HTTP_AUTH_USER / HTTP_AUTH_PASS  (original single-user env vars)
+//   - HTTP_AUTH_USERS                  (comma-separated "user:pass,user2:pass2")
 func basicAuth(next http.Handler) http.Handler {
-	user := os.Getenv("HTTP_AUTH_USER")
-	pass := os.Getenv("HTTP_AUTH_PASS")
-	if user == "" && pass == "" {
+	creds := map[string]string{}
+	if u := os.Getenv("HTTP_AUTH_USER"); u != "" {
+		creds[u] = os.Getenv("HTTP_AUTH_PASS")
+	}
+	for _, pair := range strings.Split(os.Getenv("HTTP_AUTH_USERS"), ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		u, p, ok := strings.Cut(pair, ":")
+		if ok && u != "" {
+			creds[u] = p
+		}
+	}
+	if len(creds) == 0 {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, p, ok := r.BasicAuth()
-		if !ok || u != user || p != pass {
+		if want, found := creds[u]; !ok || !found || p != want {
 			w.Header().Set("WWW-Authenticate", `Basic realm="ebay-watch"`)
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte("Unauthorized\n"))
