@@ -904,10 +904,8 @@
     }
 
     const SORT_LS_KEY = "ebay-watch-listings-sort";
-    const TAGS_LS_KEY = "ebay-watch-active-tags";
     let cachedSearches = [];
     let lastListingItems = [];
-    let activeTagSearchIds = null; // null = not yet initialized; Set<id> once initialized
     let searchesMenuOpen = false;
     let searchesMenuPreviousFocus = null;
 
@@ -1577,54 +1575,18 @@
       wrap.appendChild(btn);
     }
 
+    function syncTagButton(searchId, active) {
+      const btn = document.querySelector('[data-tag-search-id="' + String(searchId) + '"]');
+      if (btn) {
+        btn.classList.toggle("search-tag--active", active);
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
+      }
+    }
+
     function renderSearchTags(searches) {
       const container = document.getElementById("search-tag-strip");
       if (!container) return;
       const list = searches || [];
-
-      // On first load, restore from localStorage (fall back to all active).
-      // On subsequent calls, activate any newly added searches not yet in the known set.
-      // Storage format: { active: number[], known: number[] }
-      // - active: IDs the user has enabled
-      // - known: all IDs seen at save time (used to detect newly added searches)
-      // This lets us distinguish "deliberately unchecked" from "newly added".
-      if (activeTagSearchIds === null) {
-        const saved = localStorage.getItem(TAGS_LS_KEY);
-        if (saved !== null) {
-          try {
-            const parsed = JSON.parse(saved);
-            // Support new format { active, known } and legacy plain array
-            let activeIds, knownIds;
-            if (Array.isArray(parsed)) {
-              // Legacy format: plain array was the active set, no known set.
-              // Treat all current IDs as known so nothing gets re-added.
-              activeIds = new Set(parsed);
-              knownIds = new Set(parsed);
-            } else {
-              activeIds = new Set(parsed.active || []);
-              knownIds = new Set(parsed.known || parsed.active || []);
-            }
-            activeTagSearchIds = activeIds;
-            // Activate searches added since last visit (id never seen before)
-            for (const s of list) {
-              if (!knownIds.has(s.id)) activeTagSearchIds.add(s.id);
-            }
-          } catch (_) {
-            activeTagSearchIds = new Set(list.map((s) => s.id));
-          }
-        } else {
-          activeTagSearchIds = new Set(list.map((s) => s.id));
-        }
-      } else {
-        const knownIds = new Set(
-          Array.from(container.querySelectorAll("[data-tag-search-id]")).map((el) =>
-            Number(el.dataset.tagSearchId),
-          ),
-        );
-        for (const s of list) {
-          if (!knownIds.has(s.id)) activeTagSearchIds.add(s.id);
-        }
-      }
 
       container.innerHTML = "";
       for (const s of list) {
@@ -1632,25 +1594,33 @@
         btn.type = "button";
         btn.className = "search-tag";
         btn.dataset.tagSearchId = String(s.id);
-        const isActive = activeTagSearchIds.has(s.id);
+        const isActive = s.show_in_results !== false;
         if (isActive) btn.classList.add("search-tag--active");
         btn.setAttribute("aria-pressed", isActive ? "true" : "false");
         btn.title = s.query || "";
         btn.textContent = shortenLabel(s.query || "Search", 34);
-        btn.addEventListener("click", () => {
-          if (activeTagSearchIds.has(s.id)) {
-            activeTagSearchIds.delete(s.id);
-          } else {
-            activeTagSearchIds.add(s.id);
-          }
-          const on = activeTagSearchIds.has(s.id);
-          btn.classList.toggle("search-tag--active", on);
-          btn.setAttribute("aria-pressed", on ? "true" : "false");
-          localStorage.setItem(TAGS_LS_KEY, JSON.stringify({
-            active: Array.from(activeTagSearchIds),
-            known: Array.from(cachedSearches.map((s) => s.id)),
-          }));
+        btn.addEventListener("click", async () => {
+          const want = !btn.classList.contains("search-tag--active");
+          // Optimistically update UI immediately
+          btn.classList.toggle("search-tag--active", want);
+          btn.setAttribute("aria-pressed", want ? "true" : "false");
+          s.show_in_results = want;
+          syncSearchRowCheckbox(s.id, want);
+          renderGridSourcesSummary(cachedSearches);
           renderItemGrid();
+          try {
+            await api("PATCH", "/api/searches?id=" + encodeURIComponent(s.id), { show_in_results: want });
+          } catch (e) {
+            // Rollback on failure
+            s.show_in_results = !want;
+            btn.classList.toggle("search-tag--active", !want);
+            btn.setAttribute("aria-pressed", !want ? "true" : "false");
+            syncSearchRowCheckbox(s.id, !want);
+            renderGridSourcesSummary(cachedSearches);
+            renderItemGrid();
+            console.error("[ebay-watch] tag toggle failed", e);
+            toast(e.message || "Could not update filter");
+          }
         });
         container.appendChild(btn);
       }
@@ -1660,11 +1630,13 @@
       const grid = document.getElementById("items");
       const empty = document.getElementById("items-empty");
       grid.innerHTML = "";
-      const items = sortListings(lastListingItems, getSortMode()).filter((it) =>
-        passesWideShoeSearchFilter(it) &&
-        itemPassesExcludeFilter(it) &&
-        (activeTagSearchIds === null || activeTagSearchIds.has(it.search_id)),
-      );
+      const searchMap = new Map((cachedSearches || []).map((s) => [s.id, s]));
+      const items = sortListings(lastListingItems, getSortMode()).filter((it) => {
+        const s = searchMap.get(it.search_id);
+        return passesWideShoeSearchFilter(it) &&
+          itemPassesExcludeFilter(it) &&
+          (!s || s.show_in_results !== false);
+      });
       empty.hidden = items.length > 0;
       for (const it of items) {
         const card = document.createElement("article");
@@ -2055,6 +2027,7 @@
           try {
             await api("PATCH", "/api/searches?id=" + encodeURIComponent(s.id), { show_in_results: want });
             s.show_in_results = want;
+            syncTagButton(s.id, want);
             renderGridSourcesSummary(cachedSearches);
             await loadItems();
           } catch (e) {
