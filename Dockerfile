@@ -5,7 +5,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 # We use modernc.org/sqlite, so CGO_ENABLED=0 works perfectly
-RUN CGO_ENABLED=0 GOOS=linux go build -o /ebay-watch ./cmd/ebay-watch
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o /ebay-watch ./cmd/ebay-watch
 
 # Stage 2: Final runtime image (Node.js + Playwright Browsers + Go Binary)
 FROM ubuntu:22.04

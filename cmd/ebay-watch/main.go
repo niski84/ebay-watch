@@ -16,7 +16,8 @@ import (
 	"ebay-watch/internal/store"
 )
 
-const BUILD_DATE = "2026-04-03"
+// buildTime is injected at build via: -ldflags "-X main.buildTime=<RFC3339>"
+var buildTime = "unknown"
 
 func main() {
 	cfg, err := config.Load()
@@ -46,7 +47,7 @@ func main() {
 	defer cancel()
 	go poller.StartBackground(ctx, cfg.PollInterval, st, searcher)
 
-	srv := server.New(cfg, st, searcher, "ebay.com")
+	srv := server.New(cfg, st, searcher, "ebay.com", buildTime)
 	addr := ":" + cfg.Port
 	fmt.Printf("[BOOT] ebay-watch listening on %s web=%s data=%s poll=%s fetch=ebay.com (Playwright)\n", addr, cfg.WebDir, cfg.DataDir, cfg.PollInterval)
 	log.Fatal(http.ListenAndServe(addr, srv.Routes()))

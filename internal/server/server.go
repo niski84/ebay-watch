@@ -23,11 +23,12 @@ type Server struct {
 	store     *store.Store
 	search    ebay.Searcher
 	fetchMode string
+	buildTime string
 }
 
 // New creates an HTTP server facade.
-func New(cfg config.Config, st *store.Store, search ebay.Searcher, fetchMode string) *Server {
-	return &Server{cfg: cfg, store: st, search: search, fetchMode: fetchMode}
+func New(cfg config.Config, st *store.Store, search ebay.Searcher, fetchMode string, buildTime string) *Server {
+	return &Server{cfg: cfg, store: st, search: search, fetchMode: fetchMode, buildTime: buildTime}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -99,7 +100,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, map[string]any{
 		"success": true, "status": "ok", "service": "ebay-watch",
-		"fetch": s.fetchMode,
+		"fetch": s.fetchMode, "build_time": s.buildTime,
 	})
 }
 

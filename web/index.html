@@ -732,7 +732,35 @@
   <header>
     <div class="header-main">
 <span id="header-date" style="color:var(--muted);font-size:0.85rem;font-weight:400"></span>
-      <script>document.getElementById('header-date').textContent=new Date().toLocaleDateString('en-US',{weekday:'short',year:'numeric',month:'short',day:'numeric'});</script>
+      <script>
+        (function() {
+          function buildAge(iso) {
+            var d = new Date(iso);
+            if (isNaN(d)) return null;
+            var sec = Math.floor((Date.now() - d.getTime()) / 1000);
+            if (sec < 60) return sec + "s old";
+            var min = Math.floor(sec / 60);
+            if (min < 60) return min + "m old";
+            var hr = Math.floor(min / 60);
+            if (hr < 24) return hr + "h old";
+            var days = Math.floor(hr / 24);
+            return days + "d old";
+          }
+          function fmtBuildTime(iso) {
+            var d = new Date(iso);
+            if (isNaN(d)) return iso;
+            return d.toLocaleString('en-US', {month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
+          }
+          fetch('/api/health').then(function(r){return r.json();}).then(function(data){
+            var bt = data && data.build_time;
+            var el = document.getElementById('header-date');
+            if (!el) return;
+            if (!bt || bt === 'unknown') { el.textContent = 'Build time unknown'; return; }
+            var age = buildAge(bt);
+            el.textContent = 'Built ' + fmtBuildTime(bt) + (age ? ' \u00b7 ' + age : '');
+          }).catch(function(){});
+        })();
+      </script>
       <div class="toolbar">
         <button type="button" class="primary" id="btn-refresh" data-testid="btn-refresh">Refresh</button>
         <button type="button" id="btn-poll" data-testid="btn-poll">Poll now</button>
