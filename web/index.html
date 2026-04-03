@@ -2053,14 +2053,21 @@
 
         cb.addEventListener("change", async () => {
           const want = cb.checked;
+          // Optimistically update in-memory state and tag button immediately
+          s.show_in_results = want;
+          syncTagButton(s.id, want);
+          renderGridSourcesSummary(cachedSearches);
+          renderItemGrid();
           try {
             await api("PATCH", "/api/searches?id=" + encodeURIComponent(s.id), { show_in_results: want });
-            s.show_in_results = want;
-            syncTagButton(s.id, want);
-            renderGridSourcesSummary(cachedSearches);
             await loadItems();
           } catch (e) {
+            // Rollback on failure
             cb.checked = !want;
+            s.show_in_results = !want;
+            syncTagButton(s.id, !want);
+            renderGridSourcesSummary(cachedSearches);
+            renderItemGrid();
             console.error("[ebay-watch] show-in-results failed", e);
             toast(e.message || "Could not update filter");
           }
