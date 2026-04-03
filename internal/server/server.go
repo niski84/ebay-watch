@@ -91,6 +91,7 @@ func respondJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// handleHealth returns a 200 OK response to indicate the server is running.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		respondJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "method not allowed"})
