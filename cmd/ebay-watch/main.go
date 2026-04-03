@@ -16,6 +16,8 @@ import (
 	"ebay-watch/internal/store"
 )
 
+const VERSION = "1.0.0"
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
