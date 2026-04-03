@@ -47,6 +47,7 @@ func main() {
 	srv := server.New(cfg, st, searcher, "ebay.com")
 	addr := ":" + cfg.Port
 	fmt.Printf("[BOOT] ebay-watch listening on %s web=%s data=%s poll=%s fetch=ebay.com (Playwright)\n", addr, cfg.WebDir, cfg.DataDir, cfg.PollInterval)
+	log.Printf("ebay-watch started on port %s", cfg.Port)
 	log.Fatal(http.ListenAndServe(addr, srv.Routes()))
 }
 
