@@ -680,9 +680,55 @@
     .search-tag.search-tag--active:hover {
       background: color-mix(in srgb, var(--accent) 22%, var(--panel));
     }
+    .top-banner {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 0.45rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .top-banner-logo {
+      font-size: 1rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      user-select: none;
+    }
+    .top-banner-logo .e { color: #3665f3; }
+    .top-banner-logo .b { color: #e53238; }
+    .top-banner-logo .a { color: #f5af02; }
+    .top-banner-logo .y { color: #86b817; }
+    .top-banner-sep {
+      width: 1px;
+      height: 1rem;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+    .top-banner-tag {
+      font-weight: 600;
+      color: var(--accent);
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .top-banner-desc {
+      flex: 1;
+    }
   </style>
 </head>
 <body>
+  <div class="top-banner" data-testid="top-banner">
+    <span class="top-banner-logo" aria-label="eBay Watch">
+      <span class="e">e</span><span class="b">B</span><span class="a">a</span><span class="y">y</span>
+      <span style="color:var(--text);font-weight:700"> Watch</span>
+    </span>
+    <span class="top-banner-sep"></span>
+    <span class="top-banner-tag">Price Tracker</span>
+    <span class="top-banner-sep"></span>
+    <span class="top-banner-desc">Monitor eBay listings — new items glow, seen items fade, rejected items hide.</span>
+  </div>
   <header>
     <div class="header-main">
       <h1 data-testid="app-title">eBay watch</h1>
