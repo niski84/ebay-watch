@@ -475,6 +475,7 @@
     }
     .toast[data-visible="true"] { display: block; }
     .empty { color: var(--muted); font-size: 0.95rem; }
+    .attribution { text-align: center; padding: 1.25rem 1rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--border); }
     .listings-bar {
       display: flex;
       flex-wrap: wrap;
@@ -786,6 +787,7 @@
       <p class="empty" id="items-empty" data-testid="items-empty">No listings to show — check at least one saved search for results, or run <strong>Poll now</strong> if you have not yet. Listings come from the public eBay search page (scraped, not the official API). For bot issues, try <code>EBAY_PW_HEADLESS=0</code> before <code>./scripts/reload.sh</code>.</p>
     </section>
   </main>
+  <footer class="attribution">attributed to Nicholas SK ITCH</footer>
   <div id="lightbox" class="lightbox" hidden data-testid="lightbox">
     <button type="button" class="lightbox-scrim" id="lightbox-scrim" aria-label="Close gallery"></button>
     <div class="lightbox-panel" role="dialog" aria-modal="true" aria-label="Listing photos">
@@ -1541,11 +1543,20 @@
         const saved = localStorage.getItem(TAGS_LS_KEY);
         if (saved !== null) {
           try {
-            const savedIds = new Set(JSON.parse(saved));
-            activeTagSearchIds = savedIds;
-            // Activate searches added since last visit (id not in saved list at all)
+            const parsed = JSON.parse(saved);
+            // Support both old format (plain array) and new format ({active, known})
+            let savedActive, knownIds;
+            if (Array.isArray(parsed)) {
+              savedActive = new Set(parsed);
+              knownIds = savedActive; // old format: treat saved IDs as known
+            } else {
+              savedActive = new Set(parsed.active);
+              knownIds = new Set(parsed.known);
+            }
+            activeTagSearchIds = new Set(savedActive);
+            // Only auto-activate searches that are truly new (not known from last save)
             for (const s of list) {
-              if (!savedIds.has(s.id)) activeTagSearchIds.add(s.id);
+              if (!knownIds.has(s.id)) activeTagSearchIds.add(s.id);
             }
           } catch (_) {
             activeTagSearchIds = new Set(list.map((s) => s.id));
@@ -1584,7 +1595,10 @@
           const on = activeTagSearchIds.has(s.id);
           btn.classList.toggle("search-tag--active", on);
           btn.setAttribute("aria-pressed", on ? "true" : "false");
-          localStorage.setItem(TAGS_LS_KEY, JSON.stringify(Array.from(activeTagSearchIds)));
+          localStorage.setItem(TAGS_LS_KEY, JSON.stringify({
+            active: Array.from(activeTagSearchIds),
+            known: cachedSearches.map((s) => s.id),
+          }));
           renderItemGrid();
         });
         container.appendChild(btn);
