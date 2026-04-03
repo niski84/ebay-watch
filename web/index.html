@@ -643,6 +643,43 @@
       color: var(--accent);
       flex-shrink: 0;
     }
+    .search-tag-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-bottom: 1rem;
+    }
+    .search-tag-strip:empty { display: none; }
+    .search-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.3rem 0.8rem;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1.5px solid var(--border);
+      background: var(--panel);
+      color: var(--muted);
+      transition: border-color 0.12s, background 0.12s, color 0.12s;
+      line-height: 1.3;
+      max-width: 18rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .search-tag.search-tag--active {
+      border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+      color: var(--accent);
+    }
+    .search-tag:hover:not(.search-tag--active) {
+      border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+      color: var(--text);
+    }
+    .search-tag.search-tag--active:hover {
+      background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+    }
   </style>
 </head>
 <body>
@@ -730,6 +767,7 @@
     <section aria-label="Results">
       <h2>Listings</h2>
       <p class="section-hint"><strong>New</strong> listings (not yet reviewed) have a soft glow and badge — hover the image area to mark as seen. Rejected items stay hidden. Open <strong>Saved searches</strong> in the header to add searches or change which ones feed this grid. If a saved search mentions <strong>wide</strong>, <strong>EE</strong>, or <strong>width:</strong> (from a pasted eBay URL), listings that clearly say <strong>D</strong> or <strong>medium</strong> width are hidden here because eBay’s results are often loose.</p>
+      <div id="search-tag-strip" class="search-tag-strip" role="group" aria-label="Filter grid by search"></div>
       <div class="listings-bar" id="listings-bar">
         <div class="listings-bar-col">
           <span class="listings-bar-label" id="grid-sources-label">Grid sources</span>
@@ -821,6 +859,7 @@
     const SORT_LS_KEY = "ebay-watch-listings-sort";
     let cachedSearches = [];
     let lastListingItems = [];
+    let activeTagSearchIds = null; // null = not yet initialized; Set<id> once initialized
     let searchesMenuOpen = false;
     let searchesMenuPreviousFocus = null;
 
@@ -1490,12 +1529,59 @@
       wrap.appendChild(btn);
     }
 
+    function renderSearchTags(searches) {
+      const container = document.getElementById("search-tag-strip");
+      if (!container) return;
+      const list = searches || [];
+
+      // On first load, activate all. On subsequent loads, activate any newly added searches.
+      if (activeTagSearchIds === null) {
+        activeTagSearchIds = new Set(list.map((s) => s.id));
+      } else {
+        const rendered = new Set(
+          Array.from(container.querySelectorAll("[data-tag-search-id]")).map((el) =>
+            Number(el.dataset.tagSearchId),
+          ),
+        );
+        for (const s of list) {
+          if (!rendered.has(s.id)) activeTagSearchIds.add(s.id);
+        }
+      }
+
+      container.innerHTML = "";
+      for (const s of list) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "search-tag";
+        btn.dataset.tagSearchId = String(s.id);
+        const isActive = activeTagSearchIds.has(s.id);
+        if (isActive) btn.classList.add("search-tag--active");
+        btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+        btn.title = s.query || "";
+        btn.textContent = shortenLabel(s.query || "Search", 34);
+        btn.addEventListener("click", () => {
+          if (activeTagSearchIds.has(s.id)) {
+            activeTagSearchIds.delete(s.id);
+          } else {
+            activeTagSearchIds.add(s.id);
+          }
+          const on = activeTagSearchIds.has(s.id);
+          btn.classList.toggle("search-tag--active", on);
+          btn.setAttribute("aria-pressed", on ? "true" : "false");
+          renderItemGrid();
+        });
+        container.appendChild(btn);
+      }
+    }
+
     function renderItemGrid() {
       const grid = document.getElementById("items");
       const empty = document.getElementById("items-empty");
       grid.innerHTML = "";
       const items = sortListings(lastListingItems, getSortMode()).filter((it) =>
-        passesWideShoeSearchFilter(it) && itemPassesExcludeFilter(it),
+        passesWideShoeSearchFilter(it) &&
+        itemPassesExcludeFilter(it) &&
+        (activeTagSearchIds === null || activeTagSearchIds.has(it.search_id)),
       );
       empty.hidden = items.length > 0;
       for (const it of items) {
@@ -1994,6 +2080,7 @@
         li.appendChild(rowActions);
         ul.appendChild(li);
       }
+      renderSearchTags(cachedSearches);
       renderGridSourcesSummary(cachedSearches);
       updateSavedSearchesCountBadge();
     }
