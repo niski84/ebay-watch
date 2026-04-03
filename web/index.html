@@ -1638,6 +1638,7 @@
           renderItemGrid();
           try {
             await api("PATCH", "/api/searches?id=" + encodeURIComponent(s.id), { show_in_results: want });
+            await loadItems();
           } catch (e) {
             // Rollback on failure
             s.show_in_results = !want;
