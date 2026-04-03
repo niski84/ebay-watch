@@ -857,10 +857,8 @@
     }
 
     const SORT_LS_KEY = "ebay-watch-listings-sort";
-    const TAGS_LS_KEY = "ebay-watch-active-tags";
     let cachedSearches = [];
     let lastListingItems = [];
-    let activeTagSearchIds = null; // null = not yet initialized; Set<id> once initialized
     let searchesMenuOpen = false;
     let searchesMenuPreviousFocus = null;
 
@@ -1535,57 +1533,32 @@
       if (!container) return;
       const list = searches || [];
 
-      // On first load, restore from localStorage (fall back to all active).
-      // On subsequent calls, activate any newly added searches not yet in the saved set.
-      if (activeTagSearchIds === null) {
-        const saved = localStorage.getItem(TAGS_LS_KEY);
-        if (saved !== null) {
-          try {
-            const savedIds = new Set(JSON.parse(saved));
-            activeTagSearchIds = savedIds;
-            // Activate searches added since last visit (id not in saved list at all)
-            for (const s of list) {
-              if (!savedIds.has(s.id)) activeTagSearchIds.add(s.id);
-            }
-          } catch (_) {
-            activeTagSearchIds = new Set(list.map((s) => s.id));
-          }
-        } else {
-          activeTagSearchIds = new Set(list.map((s) => s.id));
-        }
-      } else {
-        const rendered = new Set(
-          Array.from(container.querySelectorAll("[data-tag-search-id]")).map((el) =>
-            Number(el.dataset.tagSearchId),
-          ),
-        );
-        for (const s of list) {
-          if (!rendered.has(s.id)) activeTagSearchIds.add(s.id);
-        }
-      }
-
       container.innerHTML = "";
       for (const s of list) {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "search-tag";
         btn.dataset.tagSearchId = String(s.id);
-        const isActive = activeTagSearchIds.has(s.id);
+        const isActive = s.show_in_results !== false;
         if (isActive) btn.classList.add("search-tag--active");
         btn.setAttribute("aria-pressed", isActive ? "true" : "false");
         btn.title = s.query || "";
         btn.textContent = shortenLabel(s.query || "Search", 34);
-        btn.addEventListener("click", () => {
-          if (activeTagSearchIds.has(s.id)) {
-            activeTagSearchIds.delete(s.id);
-          } else {
-            activeTagSearchIds.add(s.id);
+        btn.addEventListener("click", async () => {
+          const want = !isActive;
+          btn.disabled = true;
+          try {
+            await api("PATCH", "/api/searches?id=" + encodeURIComponent(s.id), { show_in_results: want });
+            s.show_in_results = want;
+            renderSearchTags(cachedSearches);
+            renderGridSourcesSummary(cachedSearches);
+            await loadItems();
+          } catch (e) {
+            console.error("[ebay-watch] toggle search tag failed", e);
+            toast(e.message || "Could not update filter");
+          } finally {
+            btn.disabled = false;
           }
-          const on = activeTagSearchIds.has(s.id);
-          btn.classList.toggle("search-tag--active", on);
-          btn.setAttribute("aria-pressed", on ? "true" : "false");
-          localStorage.setItem(TAGS_LS_KEY, JSON.stringify(Array.from(activeTagSearchIds)));
-          renderItemGrid();
         });
         container.appendChild(btn);
       }
@@ -1597,8 +1570,7 @@
       grid.innerHTML = "";
       const items = sortListings(lastListingItems, getSortMode()).filter((it) =>
         passesWideShoeSearchFilter(it) &&
-        itemPassesExcludeFilter(it) &&
-        (activeTagSearchIds === null || activeTagSearchIds.has(it.search_id)),
+        itemPassesExcludeFilter(it),
       );
       empty.hidden = items.length > 0;
       for (const it of items) {
@@ -1990,6 +1962,7 @@
           try {
             await api("PATCH", "/api/searches?id=" + encodeURIComponent(s.id), { show_in_results: want });
             s.show_in_results = want;
+            renderSearchTags(cachedSearches);
             renderGridSourcesSummary(cachedSearches);
             await loadItems();
           } catch (e) {

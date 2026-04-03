@@ -16,6 +16,8 @@ import (
 	"ebay-watch/internal/store"
 )
 
+// main initializes the store, seeds searches from config, starts the background
+// eBay poller, and serves the web UI over HTTP.
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
