@@ -1,0 +1,19 @@
+name: Morning Poll
+
+on:
+  schedule:
+    # 8:00 AM US Central (UTC-5 standard / UTC-6 daylight)
+    # Using 13:00 UTC to hit ~8am CT year-round (splits the difference)
+    - cron: '0 13 * * *'
+  workflow_dispatch: # allow manual trigger from GitHub UI
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake machine and trigger poll
+        run: |
+          curl -fsS -X POST \
+            -u "${{ secrets.EBAY_WATCH_USER }}:${{ secrets.EBAY_WATCH_PASS }}" \
+            https://ebay-watch.fly.dev/api/poll
+        timeout-minutes: 30
