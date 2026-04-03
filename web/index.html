@@ -857,6 +857,7 @@
     }
 
     const SORT_LS_KEY = "ebay-watch-listings-sort";
+    const TAGS_LS_KEY = "ebay-watch-active-tags";
     let cachedSearches = [];
     let lastListingItems = [];
     let activeTagSearchIds = null; // null = not yet initialized; Set<id> once initialized
@@ -1534,9 +1535,24 @@
       if (!container) return;
       const list = searches || [];
 
-      // On first load, activate all. On subsequent loads, activate any newly added searches.
+      // On first load, restore from localStorage (fall back to all active).
+      // On subsequent calls, activate any newly added searches not yet in the saved set.
       if (activeTagSearchIds === null) {
-        activeTagSearchIds = new Set(list.map((s) => s.id));
+        const saved = localStorage.getItem(TAGS_LS_KEY);
+        if (saved !== null) {
+          try {
+            const savedIds = new Set(JSON.parse(saved));
+            activeTagSearchIds = savedIds;
+            // Activate searches added since last visit (id not in saved list at all)
+            for (const s of list) {
+              if (!savedIds.has(s.id)) activeTagSearchIds.add(s.id);
+            }
+          } catch (_) {
+            activeTagSearchIds = new Set(list.map((s) => s.id));
+          }
+        } else {
+          activeTagSearchIds = new Set(list.map((s) => s.id));
+        }
       } else {
         const rendered = new Set(
           Array.from(container.querySelectorAll("[data-tag-search-id]")).map((el) =>
@@ -1568,6 +1584,7 @@
           const on = activeTagSearchIds.has(s.id);
           btn.classList.toggle("search-tag--active", on);
           btn.setAttribute("aria-pressed", on ? "true" : "false");
+          localStorage.setItem(TAGS_LS_KEY, JSON.stringify(Array.from(activeTagSearchIds)));
           renderItemGrid();
         });
         container.appendChild(btn);
