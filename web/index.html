@@ -1584,16 +1584,31 @@
       const list = searches || [];
 
       // On first load, restore from localStorage (fall back to all active).
-      // On subsequent calls, activate any newly added searches not yet in the saved set.
+      // On subsequent calls, activate any newly added searches not yet in the known set.
+      // Storage format: { active: number[], known: number[] }
+      // - active: IDs the user has enabled
+      // - known: all IDs seen at save time (used to detect newly added searches)
+      // This lets us distinguish "deliberately unchecked" from "newly added".
       if (activeTagSearchIds === null) {
         const saved = localStorage.getItem(TAGS_LS_KEY);
         if (saved !== null) {
           try {
-            const savedIds = new Set(JSON.parse(saved));
-            activeTagSearchIds = savedIds;
-            // Activate searches added since last visit (id not in saved list at all)
+            const parsed = JSON.parse(saved);
+            // Support new format { active, known } and legacy plain array
+            let activeIds, knownIds;
+            if (Array.isArray(parsed)) {
+              // Legacy format: plain array was the active set, no known set.
+              // Treat all current IDs as known so nothing gets re-added.
+              activeIds = new Set(parsed);
+              knownIds = new Set(parsed);
+            } else {
+              activeIds = new Set(parsed.active || []);
+              knownIds = new Set(parsed.known || parsed.active || []);
+            }
+            activeTagSearchIds = activeIds;
+            // Activate searches added since last visit (id never seen before)
             for (const s of list) {
-              if (!savedIds.has(s.id)) activeTagSearchIds.add(s.id);
+              if (!knownIds.has(s.id)) activeTagSearchIds.add(s.id);
             }
           } catch (_) {
             activeTagSearchIds = new Set(list.map((s) => s.id));
@@ -1602,13 +1617,13 @@
           activeTagSearchIds = new Set(list.map((s) => s.id));
         }
       } else {
-        const rendered = new Set(
+        const knownIds = new Set(
           Array.from(container.querySelectorAll("[data-tag-search-id]")).map((el) =>
             Number(el.dataset.tagSearchId),
           ),
         );
         for (const s of list) {
-          if (!rendered.has(s.id)) activeTagSearchIds.add(s.id);
+          if (!knownIds.has(s.id)) activeTagSearchIds.add(s.id);
         }
       }
 
@@ -1632,7 +1647,10 @@
           const on = activeTagSearchIds.has(s.id);
           btn.classList.toggle("search-tag--active", on);
           btn.setAttribute("aria-pressed", on ? "true" : "false");
-          localStorage.setItem(TAGS_LS_KEY, JSON.stringify(Array.from(activeTagSearchIds)));
+          localStorage.setItem(TAGS_LS_KEY, JSON.stringify({
+            active: Array.from(activeTagSearchIds),
+            known: Array.from(cachedSearches.map((s) => s.id)),
+          }));
           renderItemGrid();
         });
         container.appendChild(btn);
