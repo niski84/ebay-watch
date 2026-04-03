@@ -16,6 +16,8 @@ import (
 	"ebay-watch/internal/store"
 )
 
+const BUILD_DATE = "2026-04-03"
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
