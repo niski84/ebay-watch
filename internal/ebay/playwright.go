@@ -112,6 +112,7 @@ func (p *Playwright) Search(spec SearchSpec) ([]Item, error) {
 		PriceCurrency  string   `json:"priceCurrency"`
 		Condition      string   `json:"condition"`
 		ListingDetails string   `json:"listingDetails"`
+		SellerName     string   `json:"sellerName"`
 	}
 	if err := json.Unmarshal(bytes.TrimSpace(out), &raw); err != nil {
 		return nil, fmt.Errorf("playwright json: %w (stderr=%s)", err, strings.TrimSpace(stderr.String()))
@@ -139,6 +140,7 @@ func (p *Playwright) Search(spec SearchSpec) ([]Item, error) {
 			PriceCurrency:  r.PriceCurrency,
 			Condition:      r.Condition,
 			ListingDetails: r.ListingDetails,
+			SellerName:     strings.TrimSpace(r.SellerName),
 		})
 	}
 	return outItems, nil

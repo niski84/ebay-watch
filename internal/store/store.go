@@ -43,6 +43,7 @@ type Listing struct {
 	ImageURL       string    `json:"image_url"`
 	ImageURLs      []string  `json:"image_urls,omitempty"`
 	ItemWebURL     string    `json:"item_web_url"`
+	SellerName     string    `json:"seller_name,omitempty"`
 	FetchedAt      time.Time `json:"fetched_at"`
 	Seen           bool      `json:"seen"`
 }
@@ -116,6 +117,11 @@ CREATE TABLE IF NOT EXISTS rejects (
   ebay_item_id TEXT PRIMARY KEY,
   rejected_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS rejected_sellers (
+  seller_name TEXT PRIMARY KEY,
+  rejected_at TEXT NOT NULL
+);
 `)
 	if err != nil {
 		return err
@@ -138,7 +144,10 @@ CREATE TABLE IF NOT EXISTS rejects (
 	if err := s.migrateSearchesV2(); err != nil {
 		return err
 	}
-	return s.migrateSearchFiltersV3()
+	if err := s.migrateSearchFiltersV3(); err != nil {
+		return err
+	}
+	return s.migrateListingsSellerName()
 }
 
 func (s *Store) migrateSearchesV2() error {
@@ -227,6 +236,16 @@ func (s *Store) migrateSearchFiltersV3() error {
 			if !strings.Contains(msg, "duplicate column") {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func (s *Store) migrateListingsSellerName() error {
+	if _, err := s.db.Exec(`ALTER TABLE listings ADD COLUMN seller_name TEXT NOT NULL DEFAULT ''`); err != nil {
+		msg := strings.ToLower(err.Error())
+		if !strings.Contains(msg, "duplicate column") {
+			return err
 		}
 	}
 	return nil
@@ -611,6 +630,41 @@ func (s *Store) RejectedEbayItemIDs() (map[string]struct{}, error) {
 	return out, rows.Err()
 }
 
+// RejectSeller blocks all listings from a given eBay seller name globally.
+func (s *Store) RejectSeller(sellerName string) error {
+	sellerName = strings.TrimSpace(sellerName)
+	if sellerName == "" {
+		return fmt.Errorf("seller_name: %w", ErrEmpty)
+	}
+	if len(sellerName) > 256 {
+		return fmt.Errorf("seller_name too long")
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO rejected_sellers (seller_name, rejected_at) VALUES (?, ?)`, sellerName, now)
+	return err
+}
+
+// RejectedSellerNames returns every blocked seller name for poll-time filtering.
+func (s *Store) RejectedSellerNames() (map[string]struct{}, error) {
+	rows, err := s.db.Query(`SELECT seller_name FROM rejected_sellers`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]struct{})
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		name = strings.TrimSpace(name)
+		if name != "" {
+			out[name] = struct{}{}
+		}
+	}
+	return out, rows.Err()
+}
+
 // MarkItemSeen records that the user has reviewed this listing (global per eBay item id).
 func (s *Store) MarkItemSeen(ebayItemID string) error {
 	if err := ValidateItemID(ebayItemID); err != nil {
@@ -623,11 +677,11 @@ func (s *Store) MarkItemSeen(ebayItemID string) error {
 
 // UpsertListing stores or refreshes a listing for a search.
 // imageGalleryJSON is a JSON array of image URLs (empty if none); imageURL should be the primary thumbnail (first gallery URL is typical).
-func (s *Store) UpsertListing(searchID int64, ebayItemID, title, priceValue, priceCurrency, imageURL, imageGalleryJSON, itemWebURL, condition, listingDetails string) error {
+func (s *Store) UpsertListing(searchID int64, ebayItemID, title, priceValue, priceCurrency, imageURL, imageGalleryJSON, itemWebURL, condition, listingDetails, sellerName string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-INSERT INTO listings (ebay_item_id, search_id, title, item_condition, listing_details, price_value, price_currency, image_url, image_gallery, item_web_url, fetched_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO listings (ebay_item_id, search_id, title, item_condition, listing_details, price_value, price_currency, image_url, image_gallery, item_web_url, seller_name, fetched_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(search_id, ebay_item_id) DO UPDATE SET
   title = excluded.title,
   item_condition = excluded.item_condition,
@@ -637,8 +691,9 @@ ON CONFLICT(search_id, ebay_item_id) DO UPDATE SET
   image_url = excluded.image_url,
   image_gallery = excluded.image_gallery,
   item_web_url = excluded.item_web_url,
+  seller_name = excluded.seller_name,
   fetched_at = excluded.fetched_at
-`, ebayItemID, searchID, title, condition, listingDetails, priceValue, priceCurrency, imageURL, imageGalleryJSON, itemWebURL, now)
+`, ebayItemID, searchID, title, condition, listingDetails, priceValue, priceCurrency, imageURL, imageGalleryJSON, itemWebURL, sellerName, now)
 	return err
 }
 
@@ -647,12 +702,13 @@ ON CONFLICT(search_id, ebay_item_id) DO UPDATE SET
 func (s *Store) ListVisibleListings() ([]Listing, error) {
 	rows, err := s.db.Query(`
 SELECT l.ebay_item_id, l.search_id, s.query, l.title, IFNULL(l.item_condition, ''), IFNULL(l.listing_details, ''),
-  l.price_value, l.price_currency, l.image_url, IFNULL(l.image_gallery, ''), l.item_web_url, l.fetched_at,
+  l.price_value, l.price_currency, l.image_url, IFNULL(l.image_gallery, ''), l.item_web_url, IFNULL(l.seller_name, ''), l.fetched_at,
   CASE WHEN EXISTS (SELECT 1 FROM item_seen v WHERE v.ebay_item_id = l.ebay_item_id) THEN 1 ELSE 0 END
 FROM listings l
 JOIN searches s ON s.id = l.search_id
 WHERE IFNULL(s.show_in_results, 1) != 0
   AND NOT EXISTS (SELECT 1 FROM rejects r WHERE r.ebay_item_id = l.ebay_item_id)
+  AND NOT EXISTS (SELECT 1 FROM rejected_sellers rs WHERE rs.seller_name = l.seller_name AND l.seller_name != '')
 ORDER BY l.fetched_at DESC, l.id DESC
 `)
 	if err != nil {
@@ -721,7 +777,7 @@ func scanListings(rows *sql.Rows) ([]Listing, error) {
 		if err := rows.Scan(
 			&l.EbayItemID, &l.SearchID, &l.SearchQuery, &l.Title,
 			&l.Condition, &l.ListingDetails,
-			&l.PriceValue, &l.PriceCurrency, &l.ImageURL, &galleryRaw, &l.ItemWebURL, &fetched,
+			&l.PriceValue, &l.PriceCurrency, &l.ImageURL, &galleryRaw, &l.ItemWebURL, &l.SellerName, &fetched,
 			&seen,
 		); err != nil {
 			return nil, err

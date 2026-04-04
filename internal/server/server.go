@@ -37,6 +37,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/searches", s.handleSearches)
 	mux.HandleFunc("/api/items", s.handleItems)
 	mux.HandleFunc("/api/reject", s.handleReject)
+	mux.HandleFunc("/api/reject-seller", s.handleRejectSeller)
 	mux.HandleFunc("/api/seen", s.handleSeen)
 	mux.HandleFunc("/api/poll", s.handlePoll)
 	mux.HandleFunc("/settings", s.handleSettingsPage)
@@ -370,6 +371,27 @@ func (s *Server) handleReject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Printf("[API] /api/reject POST ebay_item_id=%s\n", body.EbayItemID)
+	respondJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (s *Server) handleRejectSeller(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondJSON(w, http.StatusMethodNotAllowed, map[string]any{"success": false, "error": "method not allowed"})
+		return
+	}
+	var body struct {
+		SellerName string `json:"seller_name"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": "invalid json"})
+		return
+	}
+	if err := s.store.RejectSeller(body.SellerName); err != nil {
+		fmt.Printf("[API] /api/reject-seller POST err=%v\n", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": err.Error()})
+		return
+	}
+	fmt.Printf("[API] /api/reject-seller POST seller_name=%s\n", body.SellerName)
 	respondJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 

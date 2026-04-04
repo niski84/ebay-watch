@@ -38,10 +38,19 @@ func pollSearch(ctx context.Context, st *store.Store, sch ebay.Searcher, se stor
 	if err != nil {
 		return fmt.Errorf("search %d: rejected ids: %w", se.ID, err)
 	}
+	rejectedSellers, err := st.RejectedSellerNames()
+	if err != nil {
+		return fmt.Errorf("search %d: rejected sellers: %w", se.ID, err)
+	}
 	var errs []error
 	for _, it := range items {
 		if _, skip := rejected[it.ItemID]; skip {
 			continue
+		}
+		if it.SellerName != "" {
+			if _, skip := rejectedSellers[it.SellerName]; skip {
+				continue
+			}
 		}
 		galleryJSON := ""
 		if len(it.ImageURLs) > 0 {
@@ -49,7 +58,7 @@ func pollSearch(ctx context.Context, st *store.Store, sch ebay.Searcher, se stor
 				galleryJSON = string(b)
 			}
 		}
-		if err := st.UpsertListing(se.ID, it.ItemID, it.Title, it.PriceValue, it.PriceCurrency, it.ImageURL, galleryJSON, it.ItemWebURL, it.Condition, it.ListingDetails); err != nil {
+		if err := st.UpsertListing(se.ID, it.ItemID, it.Title, it.PriceValue, it.PriceCurrency, it.ImageURL, galleryJSON, it.ItemWebURL, it.Condition, it.ListingDetails, it.SellerName); err != nil {
 			fmt.Printf("[POLL] upsert search_id=%d item_id=%s err=%v\n", se.ID, it.ItemID, err)
 			errs = append(errs, err)
 		}

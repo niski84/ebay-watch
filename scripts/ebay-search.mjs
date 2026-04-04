@@ -306,6 +306,13 @@ function extractRows($, limit) {
         "";
       const { condition, listingDetails } = parseConditionLine(subtitleRaw);
 
+      const sellerRaw =
+        $el.find(".s-item__seller-info-text").first().text().trim() ||
+        $el.find(".s-item__seller-info").first().text().trim() ||
+        $el.find(".s-item__sellerName").first().text().trim() ||
+        "";
+      const sellerName = sellerRaw.replace(/^(from\s+)?seller\s*:\s*/i, "").trim();
+
       seen.add(itemId);
       rows.push({
         itemId,
@@ -317,6 +324,7 @@ function extractRows($, limit) {
         priceCurrency: "USD",
         condition,
         listingDetails,
+        sellerName,
       });
     },
   );

@@ -1425,6 +1425,7 @@
       meta.className = "meta";
       const q = String(it.search_query || "").trim();
       const price = [it.price_value, it.price_currency].filter(Boolean).join(" ");
+      const seller = String(it.seller_name || "").trim();
       if (q) {
         const span = document.createElement("span");
         span.className = "meta-search";
@@ -1453,6 +1454,15 @@
         pEl.className = "meta-price";
         pEl.textContent = price;
         meta.appendChild(pEl);
+      }
+      if (seller) {
+        if (q || price) {
+          meta.appendChild(document.createTextNode(" · "));
+        }
+        const sEl = document.createElement("span");
+        sEl.className = "meta-seller";
+        sEl.textContent = seller;
+        meta.appendChild(sEl);
       }
       return meta;
     }
@@ -1756,6 +1766,24 @@
           }
         });
         actions.appendChild(reject);
+        if (it.seller_name) {
+          const rejectSeller = document.createElement("button");
+          rejectSeller.type = "button";
+          rejectSeller.className = "danger";
+          rejectSeller.textContent = "Reject Seller";
+          rejectSeller.dataset.testid = "btn-reject-seller";
+          rejectSeller.addEventListener("click", async () => {
+            try {
+              await api("POST", "/api/reject-seller", { seller_name: it.seller_name });
+              toast("Seller rejected — will be hidden in all searches");
+              await loadItems();
+            } catch (e) {
+              console.error("[ebay-watch] reject seller failed", e);
+              toast(e.message || "Reject seller failed");
+            }
+          });
+          actions.appendChild(rejectSeller);
+        }
         body.appendChild(title);
         if (it.condition) {
           const cond = document.createElement("div");
