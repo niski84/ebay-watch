@@ -306,12 +306,14 @@ function extractRows($, limit) {
         "";
       const { condition, listingDetails } = parseConditionLine(subtitleRaw);
 
-      const sellerRaw =
-        $el.find(".s-item__seller-info-text").first().text().trim() ||
-        $el.find(".s-item__seller-info").first().text().trim() ||
-        $el.find(".s-item__sellerName").first().text().trim() ||
-        "";
+      // eBay migrated to s-card layout; no dedicated seller CSS class exists.
+      // Secondary section has one row: first span = seller name, second = feedback score.
+      const sellerRow = $el.find(".su-card-container__attributes__secondary .s-card__attribute-row").first();
+      const sellerSpans = sellerRow.length ? sellerRow.find("span.su-styled-text.primary") : null;
+      const sellerRaw = sellerSpans && sellerSpans.length ? sellerSpans.eq(0).text().trim() : "";
+      const sellerFeedbackRaw = sellerSpans && sellerSpans.length > 1 ? sellerSpans.eq(1).text().trim() : "";
       const sellerName = sellerRaw.replace(/^(from\s+)?seller\s*:\s*/i, "").trim();
+      const sellerFeedback = sellerFeedbackRaw;
 
       seen.add(itemId);
       rows.push({
@@ -325,6 +327,7 @@ function extractRows($, limit) {
         condition,
         listingDetails,
         sellerName,
+        sellerFeedback,
       });
     },
   );
@@ -686,6 +689,33 @@ async function enrichRowsGallery(browser, rows) {
         }
         if (specifics) {
           row.listingDetails = [row.listingDetails, specifics].filter(Boolean).join(" · ");
+        }
+        // Extract seller name + feedback from item page if SERP didn't provide them
+        if (!row.sellerName || !row.sellerFeedback) {
+          const sellerInfo = await page.evaluate(() => {
+            const card = document.querySelector('[data-testid="x-sellercard-atf"]');
+            let name = "";
+            let feedback = "";
+            if (card) {
+              const a = card.querySelector('a[href*="/str/"]');
+              if (a) {
+                const m = a.href.match(/\/str\/([^?/]+)/);
+                if (m) name = decodeURIComponent(m[1]);
+              }
+              // feedback: look for "X% positive (N)" text
+              const spans = Array.from(card.querySelectorAll("span"));
+              for (const s of spans) {
+                const t = s.textContent.trim();
+                if (/\d+%.*positive|\d[\d,]+\s*(feedback|ratings|reviews)/i.test(t)) {
+                  feedback = t;
+                  break;
+                }
+              }
+            }
+            return {name, feedback};
+          }).catch(() => ({name: "", feedback: ""}));
+          if (sellerInfo.name && !row.sellerName) row.sellerName = sellerInfo.name;
+          if (sellerInfo.feedback && !row.sellerFeedback) row.sellerFeedback = sellerInfo.feedback;
         }
       } catch (e) {
     if (e && e.name === "TimeoutError") {

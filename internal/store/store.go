@@ -44,6 +44,7 @@ type Listing struct {
 	ImageURLs      []string  `json:"image_urls,omitempty"`
 	ItemWebURL     string    `json:"item_web_url"`
 	SellerName     string    `json:"seller_name,omitempty"`
+	SellerFeedback string    `json:"seller_feedback,omitempty"`
 	FetchedAt      time.Time `json:"fetched_at"`
 	Seen           bool      `json:"seen"`
 }
@@ -147,7 +148,10 @@ CREATE TABLE IF NOT EXISTS rejected_sellers (
 	if err := s.migrateSearchFiltersV3(); err != nil {
 		return err
 	}
-	return s.migrateListingsSellerName()
+	if err := s.migrateListingsSellerName(); err != nil {
+		return err
+	}
+	return s.migrateListingsSellerFeedback()
 }
 
 func (s *Store) migrateSearchesV2() error {
@@ -243,6 +247,16 @@ func (s *Store) migrateSearchFiltersV3() error {
 
 func (s *Store) migrateListingsSellerName() error {
 	if _, err := s.db.Exec(`ALTER TABLE listings ADD COLUMN seller_name TEXT NOT NULL DEFAULT ''`); err != nil {
+		msg := strings.ToLower(err.Error())
+		if !strings.Contains(msg, "duplicate column") {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) migrateListingsSellerFeedback() error {
+	if _, err := s.db.Exec(`ALTER TABLE listings ADD COLUMN seller_feedback TEXT NOT NULL DEFAULT ''`); err != nil {
 		msg := strings.ToLower(err.Error())
 		if !strings.Contains(msg, "duplicate column") {
 			return err
@@ -677,11 +691,11 @@ func (s *Store) MarkItemSeen(ebayItemID string) error {
 
 // UpsertListing stores or refreshes a listing for a search.
 // imageGalleryJSON is a JSON array of image URLs (empty if none); imageURL should be the primary thumbnail (first gallery URL is typical).
-func (s *Store) UpsertListing(searchID int64, ebayItemID, title, priceValue, priceCurrency, imageURL, imageGalleryJSON, itemWebURL, condition, listingDetails, sellerName string) error {
+func (s *Store) UpsertListing(searchID int64, ebayItemID, title, priceValue, priceCurrency, imageURL, imageGalleryJSON, itemWebURL, condition, listingDetails, sellerName, sellerFeedback string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-INSERT INTO listings (ebay_item_id, search_id, title, item_condition, listing_details, price_value, price_currency, image_url, image_gallery, item_web_url, seller_name, fetched_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO listings (ebay_item_id, search_id, title, item_condition, listing_details, price_value, price_currency, image_url, image_gallery, item_web_url, seller_name, seller_feedback, fetched_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(search_id, ebay_item_id) DO UPDATE SET
   title = excluded.title,
   item_condition = excluded.item_condition,
@@ -692,8 +706,9 @@ ON CONFLICT(search_id, ebay_item_id) DO UPDATE SET
   image_gallery = excluded.image_gallery,
   item_web_url = excluded.item_web_url,
   seller_name = excluded.seller_name,
+  seller_feedback = excluded.seller_feedback,
   fetched_at = excluded.fetched_at
-`, ebayItemID, searchID, title, condition, listingDetails, priceValue, priceCurrency, imageURL, imageGalleryJSON, itemWebURL, sellerName, now)
+`, ebayItemID, searchID, title, condition, listingDetails, priceValue, priceCurrency, imageURL, imageGalleryJSON, itemWebURL, sellerName, sellerFeedback, now)
 	return err
 }
 
@@ -702,7 +717,7 @@ ON CONFLICT(search_id, ebay_item_id) DO UPDATE SET
 func (s *Store) ListVisibleListings() ([]Listing, error) {
 	rows, err := s.db.Query(`
 SELECT l.ebay_item_id, l.search_id, s.query, l.title, IFNULL(l.item_condition, ''), IFNULL(l.listing_details, ''),
-  l.price_value, l.price_currency, l.image_url, IFNULL(l.image_gallery, ''), l.item_web_url, IFNULL(l.seller_name, ''), l.fetched_at,
+  l.price_value, l.price_currency, l.image_url, IFNULL(l.image_gallery, ''), l.item_web_url, IFNULL(l.seller_name, ''), IFNULL(l.seller_feedback, ''), l.fetched_at,
   CASE WHEN EXISTS (SELECT 1 FROM item_seen v WHERE v.ebay_item_id = l.ebay_item_id) THEN 1 ELSE 0 END
 FROM listings l
 JOIN searches s ON s.id = l.search_id
@@ -777,7 +792,7 @@ func scanListings(rows *sql.Rows) ([]Listing, error) {
 		if err := rows.Scan(
 			&l.EbayItemID, &l.SearchID, &l.SearchQuery, &l.Title,
 			&l.Condition, &l.ListingDetails,
-			&l.PriceValue, &l.PriceCurrency, &l.ImageURL, &galleryRaw, &l.ItemWebURL, &l.SellerName, &fetched,
+			&l.PriceValue, &l.PriceCurrency, &l.ImageURL, &galleryRaw, &l.ItemWebURL, &l.SellerName, &l.SellerFeedback, &fetched,
 			&seen,
 		); err != nil {
 			return nil, err

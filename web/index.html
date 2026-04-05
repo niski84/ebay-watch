@@ -466,8 +466,24 @@
       border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
       vertical-align: middle;
     }
-    .card .actions { margin-top: auto; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .card .actions { margin-top: auto; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: flex-start; }
     .card a { color: var(--accent); text-decoration: none; font-size: 0.85rem; }
+    .meta-seller { font-weight: 600; color: var(--text); }
+    .meta-seller-feedback { color: var(--muted); font-size: 0.75rem; }
+    .seller-confirm {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      padding: 0.6rem 0.75rem;
+      background: color-mix(in srgb, var(--danger, #e55) 10%, var(--panel));
+      border: 1px solid color-mix(in srgb, var(--danger, #e55) 40%, transparent);
+      border-radius: 6px;
+      margin-top: 0.25rem;
+    }
+    .seller-confirm-msg { font-size: 0.82rem; color: var(--text); line-height: 1.4; }
+    .seller-confirm .danger { font-size: 0.8rem; padding: 0.25rem 0.6rem; }
+    .seller-confirm button:last-child { font-size: 0.8rem; padding: 0.25rem 0.6rem; }
     .toast {
       position: fixed; bottom: 1rem; right: 1rem;
       background: var(--panel); border: 1px solid var(--border);
@@ -1463,6 +1479,14 @@
         sEl.className = "meta-seller";
         sEl.textContent = seller;
         meta.appendChild(sEl);
+        const feedback = String(it.seller_feedback || "").trim();
+        if (feedback) {
+          meta.appendChild(document.createTextNode(" "));
+          const fbEl = document.createElement("span");
+          fbEl.className = "meta-seller-feedback";
+          fbEl.textContent = feedback;
+          meta.appendChild(fbEl);
+        }
       }
       return meta;
     }
@@ -1772,15 +1796,39 @@
           rejectSeller.className = "danger";
           rejectSeller.textContent = "Reject Seller";
           rejectSeller.dataset.testid = "btn-reject-seller";
-          rejectSeller.addEventListener("click", async () => {
-            try {
-              await api("POST", "/api/reject-seller", { seller_name: it.seller_name });
-              toast("Seller rejected — will be hidden in all searches");
-              await loadItems();
-            } catch (e) {
-              console.error("[ebay-watch] reject seller failed", e);
-              toast(e.message || "Reject seller failed");
-            }
+          rejectSeller.addEventListener("click", () => {
+            // Show inline confirm panel instead of acting immediately
+            const existing = actions.querySelector(".seller-confirm");
+            if (existing) { existing.remove(); return; }
+            const confirm = document.createElement("div");
+            confirm.className = "seller-confirm";
+            const msg = document.createElement("span");
+            msg.className = "seller-confirm-msg";
+            const sellerLabel = it.seller_feedback
+              ? `${it.seller_name} (${it.seller_feedback})`
+              : it.seller_name;
+            msg.textContent = `Block all listings from "${sellerLabel}"?`;
+            const yes = document.createElement("button");
+            yes.type = "button";
+            yes.className = "danger";
+            yes.textContent = "Yes, block";
+            yes.addEventListener("click", async () => {
+              try {
+                await api("POST", "/api/reject-seller", { seller_name: it.seller_name });
+                await loadItems();
+              } catch (e) {
+                console.error("[ebay-watch] reject seller failed", e);
+                toast(e.message || "Reject seller failed");
+              }
+            });
+            const no = document.createElement("button");
+            no.type = "button";
+            no.textContent = "Cancel";
+            no.addEventListener("click", () => confirm.remove());
+            confirm.appendChild(msg);
+            confirm.appendChild(yes);
+            confirm.appendChild(no);
+            actions.appendChild(confirm);
           });
           actions.appendChild(rejectSeller);
         }

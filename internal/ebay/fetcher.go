@@ -12,6 +12,7 @@ type Item struct {
 	Condition      string
 	ListingDetails string
 	SellerName     string
+	SellerFeedback string
 }
 
 // Searcher loads listing rows for a search (Playwright + public search page).

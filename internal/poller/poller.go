@@ -58,7 +58,7 @@ func pollSearch(ctx context.Context, st *store.Store, sch ebay.Searcher, se stor
 				galleryJSON = string(b)
 			}
 		}
-		if err := st.UpsertListing(se.ID, it.ItemID, it.Title, it.PriceValue, it.PriceCurrency, it.ImageURL, galleryJSON, it.ItemWebURL, it.Condition, it.ListingDetails, it.SellerName); err != nil {
+		if err := st.UpsertListing(se.ID, it.ItemID, it.Title, it.PriceValue, it.PriceCurrency, it.ImageURL, galleryJSON, it.ItemWebURL, it.Condition, it.ListingDetails, it.SellerName, it.SellerFeedback); err != nil {
 			fmt.Printf("[POLL] upsert search_id=%d item_id=%s err=%v\n", se.ID, it.ItemID, err)
 			errs = append(errs, err)
 		}
