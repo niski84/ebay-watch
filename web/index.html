@@ -470,6 +470,22 @@
     .card a { color: var(--accent); text-decoration: none; font-size: 0.85rem; }
     .meta-seller { font-weight: 600; color: var(--text); }
     .meta-seller-feedback { color: var(--muted); font-size: 0.75rem; }
+    .seller-risk {
+      display: inline-flex; align-items: center; gap: 0.2em;
+      font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em;
+      padding: 0.1em 0.45em; border-radius: 4px; vertical-align: middle;
+      cursor: help;
+    }
+    .seller-risk--warn {
+      background: color-mix(in srgb, #f59e0b 18%, transparent);
+      color: #d97706;
+      border: 1px solid color-mix(in srgb, #f59e0b 40%, transparent);
+    }
+    .seller-risk--danger {
+      background: color-mix(in srgb, #ef4444 18%, transparent);
+      color: #dc2626;
+      border: 1px solid color-mix(in srgb, #ef4444 40%, transparent);
+    }
     .seller-confirm {
       width: 100%;
       display: flex;
@@ -1436,6 +1452,42 @@
       return null;
     }
 
+    // Parse "99.8% positive (3.8K)" → { pct: 99.8, count: 3800 } or null
+    function parseSellerFeedback(str) {
+      if (!str) return null;
+      const pctM = str.match(/(\d+(?:\.\d+)?)\s*%/);
+      const cntM = str.match(/\(\s*([\d.]+)\s*([KkMm])?\s*\)/);
+      if (!pctM && !cntM) return null;
+      const pct = pctM ? parseFloat(pctM[1]) : null;
+      let count = null;
+      if (cntM) {
+        count = parseFloat(cntM[1]);
+        const suffix = (cntM[2] || "").toUpperCase();
+        if (suffix === "K") count = Math.round(count * 1000);
+        else if (suffix === "M") count = Math.round(count * 1000000);
+      }
+      return { pct, count };
+    }
+
+    // Returns null (safe), "warn", or "danger" + tooltip text
+    function sellerRisk(sellerName, feedbackStr) {
+      if (!sellerName) return null;
+      const parsed = parseSellerFeedback(feedbackStr);
+      // No feedback info at all — new seller or hidden history
+      if (!parsed) {
+        return { level: "warn", tip: "No seller feedback visible — this may be a new account. Proceed with caution." };
+      }
+      const { pct, count } = parsed;
+      const issues = [];
+      if (count !== null && count < 5)   issues.push({ level: "danger", msg: `Only ${count} sale${count === 1 ? "" : "s"} — very new seller` });
+      else if (count !== null && count < 25)  issues.push({ level: "warn",   msg: `Low feedback count (${count} sales)` });
+      if (pct !== null && pct < 90)  issues.push({ level: "danger", msg: `Poor rating: ${pct}% positive` });
+      else if (pct !== null && pct < 96) issues.push({ level: "warn",   msg: `Below-average rating: ${pct}% positive` });
+      if (issues.length === 0) return null;
+      const worst = issues.find(i => i.level === "danger") || issues[0];
+      return { level: worst.level, tip: issues.map(i => i.msg).join(" · ") };
+    }
+
     function buildListingMeta(it) {
       const meta = document.createElement("div");
       meta.className = "meta";
@@ -1486,6 +1538,15 @@
           fbEl.className = "meta-seller-feedback";
           fbEl.textContent = feedback;
           meta.appendChild(fbEl);
+        }
+        const risk = sellerRisk(seller, feedback);
+        if (risk) {
+          meta.appendChild(document.createTextNode(" "));
+          const badge = document.createElement("span");
+          badge.className = `seller-risk seller-risk--${risk.level}`;
+          badge.textContent = risk.level === "danger" ? "⚠ Caution" : "⚠ New seller";
+          badge.title = risk.tip;
+          meta.appendChild(badge);
         }
       }
       return meta;
