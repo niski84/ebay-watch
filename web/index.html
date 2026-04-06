@@ -1683,10 +1683,19 @@
       document.getElementById("lightbox-prev")?.addEventListener("click", () => stepLightbox(-1));
       document.getElementById("lightbox-next")?.addEventListener("click", () => stepLightbox(1));
 
+      // Close when clicking outside the image (on panel background or lightbox-main gap)
+      const panel = document.getElementById("lightbox");
+      const lightboxImg = document.getElementById("lightbox-img");
+      panel?.addEventListener("click", (e) => {
+        if (!lightboxState.open) return;
+        const t = e.target;
+        if (t === lightboxImg || t.closest(".lightbox-nav") || t.closest(".lightbox-close") || t.closest(".lightbox-scrim")) return;
+        closeLightbox();
+      });
+
       // Touch swipe support
       let touchStartX = 0;
       let touchStartY = 0;
-      const panel = document.getElementById("lightbox");
       if (panel) {
         panel.addEventListener("touchstart", (e) => {
           touchStartX = e.touches[0].clientX;
