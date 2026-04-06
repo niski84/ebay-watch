@@ -407,14 +407,45 @@
       opacity: 0.35;
       cursor: default;
     }
-    @media (max-width: 520px) {
+    @media (max-width: 600px) {
+      .lightbox {
+        padding: 0;
+      }
       .lightbox-panel {
-        flex-wrap: wrap;
+        max-width: 100vw;
+        max-height: 100dvh;
+        height: 100dvh;
+        border-radius: 0;
+        flex-direction: column;
+        justify-content: center;
+        position: relative;
+      }
+      .lightbox-main {
+        width: 100%;
+        flex: 1;
+        min-height: 0;
         justify-content: center;
       }
+      #lightbox-img {
+        max-height: calc(100dvh - 3rem);
+        border-radius: 0;
+      }
       .lightbox-nav {
-        width: 2.5rem;
-        height: 2.5rem;
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 2.75rem;
+        height: 4rem;
+        border-radius: 6px;
+        background: rgba(0, 0, 0, 0.45);
+        border-color: rgba(255,255,255,0.15);
+        z-index: 3;
+      }
+      #lightbox-prev { left: 0.35rem; }
+      #lightbox-next { right: 0.35rem; }
+      .lightbox-close {
+        top: 0.5rem;
+        right: 0.5rem;
       }
     }
     .unseen-badge {
@@ -1651,6 +1682,24 @@
       document.getElementById("lightbox-close")?.addEventListener("click", closeLightbox);
       document.getElementById("lightbox-prev")?.addEventListener("click", () => stepLightbox(-1));
       document.getElementById("lightbox-next")?.addEventListener("click", () => stepLightbox(1));
+
+      // Touch swipe support
+      let touchStartX = 0;
+      let touchStartY = 0;
+      const panel = document.getElementById("lightbox");
+      if (panel) {
+        panel.addEventListener("touchstart", (e) => {
+          touchStartX = e.touches[0].clientX;
+          touchStartY = e.touches[0].clientY;
+        }, { passive: true });
+        panel.addEventListener("touchend", (e) => {
+          if (!lightboxState.open) return;
+          const dx = e.changedTouches[0].clientX - touchStartX;
+          const dy = e.changedTouches[0].clientY - touchStartY;
+          if (Math.abs(dx) < 40 || Math.abs(dy) > Math.abs(dx)) return;
+          stepLightbox(dx < 0 ? 1 : -1);
+        }, { passive: true });
+      }
     }
 
     function syncSearchRowCheckbox(searchId, checked) {
