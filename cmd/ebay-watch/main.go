@@ -45,7 +45,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go poller.StartBackground(ctx, cfg.PollInterval, st, searcher)
+	go poller.StartBackground(ctx, cfg.PollInterval, cfg.ListingMaxAge, st, searcher)
 
 	srv := server.New(cfg, st, searcher, "ebay.com", buildTime)
 	addr := ":" + cfg.Port

@@ -18,6 +18,7 @@ type Config struct {
 	PlaywrightScript  string
 	NodePath          string
 	PlaywrightTimeout time.Duration
+	ListingMaxAge     time.Duration // listings not seen after this are purged
 }
 
 func getenv(key, def string) string {
@@ -70,6 +71,13 @@ func Load() (Config, error) {
 		}
 	}
 
+	maxAgeDays := 21
+	if s := os.Getenv("LISTING_MAX_AGE_DAYS"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			maxAgeDays = v
+		}
+	}
+
 	cfg := Config{
 		Port:              port,
 		DataDir:           dataDir,
@@ -80,6 +88,7 @@ func Load() (Config, error) {
 		PlaywrightScript:  getenv("EBAY_PLAYWRIGHT_SCRIPT", "scripts/ebay-search.mjs"),
 		NodePath:          getenv("NODE_BIN", "node"),
 		PlaywrightTimeout: pwTimeout,
+		ListingMaxAge:     time.Duration(maxAgeDays) * 24 * time.Hour,
 	}
 	return cfg, nil
 }

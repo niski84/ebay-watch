@@ -521,7 +521,7 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 				s.pollActive = false
 				s.pollMu.Unlock()
 			}()
-			if err := poller.RunPoll(context.Background(), s.store, s.search); err != nil {
+			if err := poller.RunPollWithMaxAge(context.Background(), s.store, s.search, s.cfg.ListingMaxAge); err != nil {
 				fmt.Printf("[API] /api/poll async err=%v\n", err)
 			}
 		}()

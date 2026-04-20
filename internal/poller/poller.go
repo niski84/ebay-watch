@@ -260,6 +260,12 @@ func applyTitleFilter(items []ebay.Item, filter string) []ebay.Item {
 // A 20-second delay between searches lets Firefox fully exit, frees memory, and
 // avoids eBay rate-limiting consecutive headless requests from the same IP.
 func RunPoll(ctx context.Context, st *store.Store, search ebay.Searcher) error {
+	return RunPollWithMaxAge(ctx, st, search, 21*24*time.Hour)
+}
+
+// RunPollWithMaxAge is like RunPoll but also purges listings older than maxAge
+// from actively-polled searches, and hard-purges everything older than 90 days.
+func RunPollWithMaxAge(ctx context.Context, st *store.Store, search ebay.Searcher, maxAge time.Duration) error {
 	searches, err := st.ListEnabledSearches()
 	if err != nil {
 		return err
@@ -277,6 +283,11 @@ func RunPoll(ctx context.Context, st *store.Store, search ebay.Searcher) error {
 			errs = append(errs, err)
 		}
 	}
+	if n, err := st.PurgeStaleListings(maxAge, 90*24*time.Hour); err != nil {
+		fmt.Printf("[POLL] purge error: %v\n", err)
+	} else if n > 0 {
+		fmt.Printf("[POLL] purged %d stale listings\n", n)
+	}
 	return errors.Join(errs...)
 }
 
@@ -290,15 +301,18 @@ func RunPollOne(ctx context.Context, st *store.Store, search ebay.Searcher, sear
 }
 
 // StartBackground runs RunPoll on a ticker until ctx is done.
-func StartBackground(ctx context.Context, interval time.Duration, st *store.Store, search ebay.Searcher) {
+func StartBackground(ctx context.Context, interval time.Duration, maxAge time.Duration, st *store.Store, search ebay.Searcher) {
 	if interval <= 0 {
 		interval = 4 * time.Hour
+	}
+	if maxAge <= 0 {
+		maxAge = 21 * 24 * time.Hour
 	}
 	t := time.NewTicker(interval)
 	defer t.Stop()
 
 	run := func() {
-		if err := RunPoll(context.Background(), st, search); err != nil {
+		if err := RunPollWithMaxAge(context.Background(), st, search, maxAge); err != nil {
 			fmt.Printf("[POLL] cycle error: %v\n", err)
 		}
 	}

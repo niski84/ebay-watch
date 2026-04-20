@@ -901,6 +901,45 @@ ON CONFLICT(search_id, ebay_item_id) DO UPDATE SET
 	return err
 }
 
+// PurgeStaleListings removes listings that have not been seen in recent polls.
+// It only removes listings belonging to searches that are still enabled and
+// have been polled at least once within 2× maxAge (so disabling a search doesn't
+// silently wipe its history). A hard purgeAfter cutoff removes everything older
+// regardless of search state.
+func (s *Store) PurgeStaleListings(maxAge, purgeAfter time.Duration) (int64, error) {
+	now := time.Now().UTC()
+	stale := now.Add(-maxAge).Format(time.RFC3339)
+	hard := now.Add(-purgeAfter).Format(time.RFC3339)
+
+	// Remove stale listings from actively-polled enabled searches.
+	res, err := s.db.Exec(`
+DELETE FROM listings
+WHERE fetched_at < ?
+  AND search_id IN (
+    SELECT id FROM searches
+    WHERE enabled = 1
+      AND last_polled_at > ?
+  )
+  AND ebay_item_id NOT IN (SELECT ebay_item_id FROM rejects)
+`, stale, stale)
+	if err != nil {
+		return 0, err
+	}
+	n1, _ := res.RowsAffected()
+
+	// Hard purge: remove everything older than purgeAfter regardless of search state.
+	res2, err := s.db.Exec(`
+DELETE FROM listings
+WHERE fetched_at < ?
+  AND ebay_item_id NOT IN (SELECT ebay_item_id FROM rejects)
+`, hard)
+	if err != nil {
+		return n1, err
+	}
+	n2, _ := res2.RowsAffected()
+	return n1 + n2, nil
+}
+
 // ListVisibleListings returns cached items excluding globally rejected ids and
 // items matching any search-level exclude_filter.
 func (s *Store) ListVisibleListings() ([]Listing, error) {
