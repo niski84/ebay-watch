@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,22 +9,28 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"ebay-watch/internal/config"
 	"ebay-watch/internal/ebay"
+	"ebay-watch/internal/imghash"
 	"ebay-watch/internal/poller"
 	"ebay-watch/internal/store"
 )
 
 // Server wires HTTP handlers to the store and listing fetcher.
 type Server struct {
-	cfg       config.Config
-	store     *store.Store
-	search    ebay.Searcher
-	fetchMode string
-	buildTime string
+	cfg        config.Config
+	store      *store.Store
+	search     ebay.Searcher
+	fetchMode  string
+	buildTime  string
+	pollMu     sync.Mutex
+	pollActive bool
 }
 
 // New creates an HTTP server facade.
@@ -40,6 +47,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/reject-seller", s.handleRejectSeller)
 	mux.HandleFunc("/api/seen", s.handleSeen)
 	mux.HandleFunc("/api/poll", s.handlePoll)
+	mux.HandleFunc("/api/market-lookup", s.handleMarketLookup)
+	mux.HandleFunc("/api/item-image", s.handleItemImage)
 	mux.HandleFunc("/settings", s.handleSettingsPage)
 
 	fs := http.FileServer(http.Dir(s.cfg.WebDir))
@@ -78,7 +87,6 @@ func basicAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, p, ok := r.BasicAuth()
 		if want, found := creds[u]; !ok || !found || p != want {
-			w.Header().Set("WWW-Authenticate", `Basic realm="ebay-watch"`)
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte("Unauthorized\n"))
 			return
@@ -125,6 +133,17 @@ func (s *Server) handleSearches(w http.ResponseWriter, r *http.Request) {
 		}
 		for i := range list {
 			list[i].ItemConditions = ebay.ItemConditionKeys(list[i].ItemConditionFilter)
+			if yp, yc, yl, err := s.store.GetSearchYearMarketPrices(list[i].ID); err == nil {
+				if len(yp) > 0 {
+					list[i].MarketPricesByYear = yp
+				}
+				if len(yc) > 0 {
+					list[i].MarketCountsByYear = yc
+				}
+				if len(yl) > 0 {
+					list[i].ListingsByYear = yl
+				}
+			}
 		}
 		respondJSON(w, http.StatusOK, map[string]any{"success": true, "searches": list})
 	case http.MethodPost:
@@ -365,12 +384,40 @@ func (s *Server) handleReject(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": err.Error()})
 		return
 	}
+	// Capture image URLs before Reject() deletes the listing row.
+	imgURLs, _ := s.store.GetListingImageURLs(body.EbayItemID)
+
 	if err := s.store.Reject(body.EbayItemID); err != nil {
 		fmt.Printf("[API] /api/reject POST err=%v\n", err)
 		respondJSON(w, http.StatusInternalServerError, map[string]any{"success": false, "error": err.Error()})
 		return
 	}
-	fmt.Printf("[API] /api/reject POST ebay_item_id=%s\n", body.EbayItemID)
+	fmt.Printf("[API] /api/reject POST ebay_item_id=%s images=%d\n", body.EbayItemID, len(imgURLs))
+
+	// Async: download images and store content hashes so future reposts are auto-rejected.
+	if len(imgURLs) > 0 {
+		itemID := body.EbayItemID
+		urls := imgURLs
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			var hashes []string
+			for _, u := range urls {
+				h, err := imghash.Fetch(ctx, u)
+				if err != nil {
+					fmt.Printf("[imghash] fetch err item=%s url=%s: %v\n", itemID, u, err)
+					continue
+				}
+				hashes = append(hashes, h)
+			}
+			if err := s.store.StoreImageHashes(hashes, itemID); err != nil {
+				fmt.Printf("[imghash] store err item=%s: %v\n", itemID, err)
+			} else {
+				fmt.Printf("[imghash] stored %d hashes for item=%s\n", len(hashes), itemID)
+			}
+		}()
+	}
+
 	respondJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
@@ -445,6 +492,28 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusOK, map[string]any{"success": true, "search_id": id})
 		return
 	}
+	if r.URL.Query().Get("async") == "1" {
+		s.pollMu.Lock()
+		if s.pollActive {
+			s.pollMu.Unlock()
+			respondJSON(w, http.StatusAccepted, map[string]any{"success": true, "message": "poll already running"})
+			return
+		}
+		s.pollActive = true
+		s.pollMu.Unlock()
+		go func() {
+			defer func() {
+				s.pollMu.Lock()
+				s.pollActive = false
+				s.pollMu.Unlock()
+			}()
+			if err := poller.RunPoll(context.Background(), s.store, s.search); err != nil {
+				fmt.Printf("[API] /api/poll async err=%v\n", err)
+			}
+		}()
+		respondJSON(w, http.StatusAccepted, map[string]any{"success": true, "message": "poll started"})
+		return
+	}
 	err := poller.RunPoll(r.Context(), s.store, s.search)
 	if err != nil {
 		fmt.Printf("[API] /api/poll err=%v\n", err)
@@ -452,4 +521,77 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// handleMarketLookup performs an on-demand eBay sold-listings search for a specific item title.
+// POST /api/market-lookup  body: {"query":"...", "category":"6001"}
+func (s *Server) handleMarketLookup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		respondJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "POST only"})
+		return
+	}
+	var req struct {
+		Query    string `json:"query"`
+		Category string `json:"category"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+		return
+	}
+	req.Query = strings.TrimSpace(req.Query)
+	if req.Query == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]any{"error": "query required"})
+		return
+	}
+	mp, ok := s.search.(ebay.MarketPricer)
+	if !ok {
+		respondJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "market lookup unavailable"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+	result, err := mp.FetchSoldPrices(ctx, req.Query, req.Category)
+	if err != nil {
+		fmt.Printf("[API] /api/market-lookup err=%v\n", err)
+		respondJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"success": true, "result": result})
+}
+
+var ogImageRE = regexp.MustCompile(`(?i)<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']|<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']`)
+
+// handleItemImage fetches an eBay item page and extracts the og:image URL.
+// GET /api/item-image?url=https://www.ebay.com/itm/...
+func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request) {
+	itemURL := strings.TrimSpace(r.URL.Query().Get("url"))
+	if !strings.HasPrefix(itemURL, "https://www.ebay.com/itm/") {
+		respondJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid url"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", itemURL, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		respondJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	// og:image is always in <head> — read only the first 64 KB.
+	head := make([]byte, 64*1024)
+	n, _ := io.ReadFull(resp.Body, head)
+	m := ogImageRE.FindSubmatch(head[:n])
+	if m == nil {
+		respondJSON(w, http.StatusNotFound, map[string]any{"error": "no image found"})
+		return
+	}
+	imgURL := string(m[1])
+	if imgURL == "" {
+		imgURL = string(m[2])
+	}
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	respondJSON(w, http.StatusOK, map[string]any{"image_url": imgURL})
 }
