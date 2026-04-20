@@ -53,7 +53,7 @@ func (s *Server) Routes() http.Handler {
 
 	fs := http.FileServer(http.Dir(s.cfg.WebDir))
 	mux.Handle("/", fs)
-	return logRequests(basicAuth(mux))
+	return logRequests(basicAuth(mux, "/api/", "/settings"))
 }
 
 func logRequests(next http.Handler) http.Handler {
@@ -66,7 +66,10 @@ func logRequests(next http.Handler) http.Handler {
 // basicAuth builds a credentials map from:
 //   - HTTP_AUTH_USER / HTTP_AUTH_PASS  (original single-user env vars)
 //   - HTTP_AUTH_USERS                  (comma-separated "user:pass,user2:pass2")
-func basicAuth(next http.Handler) http.Handler {
+// basicAuth enforces HTTP Basic Auth only on paths that start with one of the
+// given prefixes. Static files are intentionally left open so the login page
+// can load before credentials are available.
+func basicAuth(next http.Handler, protectedPrefixes ...string) http.Handler {
 	creds := map[string]string{}
 	if u := os.Getenv("HTTP_AUTH_USER"); u != "" {
 		creds[u] = os.Getenv("HTTP_AUTH_PASS")
@@ -85,6 +88,17 @@ func basicAuth(next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		protected := false
+		for _, prefix := range protectedPrefixes {
+			if strings.HasPrefix(r.URL.Path, prefix) {
+				protected = true
+				break
+			}
+		}
+		if !protected {
+			next.ServeHTTP(w, r)
+			return
+		}
 		u, p, ok := r.BasicAuth()
 		if want, found := creds[u]; !ok || !found || p != want {
 			w.WriteHeader(http.StatusUnauthorized)

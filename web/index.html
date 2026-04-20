@@ -1206,9 +1206,9 @@
   </div>
   <div id="toast" class="toast" role="status" data-testid="toast"></div>
 
-  <div id="login-overlay" hidden aria-modal="true" role="dialog" aria-labelledby="login-title" style="
-    position:fixed;inset:0;z-index:9000;
-    display:flex;align-items:center;justify-content:center;
+  <div id="login-overlay" aria-modal="true" role="dialog" aria-labelledby="login-title" style="
+    display:none;position:fixed;inset:0;z-index:9000;
+    align-items:center;justify-content:center;
     background:rgba(0,0,0,0.72);backdrop-filter:blur(3px);">
     <div style="
       background:var(--panel);border:1px solid var(--border);border-radius:10px;
@@ -1282,11 +1282,11 @@
     const dbg = window.ebayWatchSettingsDebug;
 
     function settingsDebugLog(message, detail) {
-      dbg.log(message, detail);
+      if (dbg) dbg.log(message, detail);
     }
 
     async function settingsDebugSnapshot(reason) {
-      await dbg.snapshot(reason, { getSearchesCount: () => (cachedSearches || []).length });
+      if (dbg) await dbg.snapshot(reason, { getSearchesCount: () => (cachedSearches || []).length });
     }
 
     const SORT_LS_KEY = "ebay-watch-listings-sort";
@@ -1476,6 +1476,7 @@
     }
 
     function initSettingsDebugPanel() {
+      if (!dbg) return;
       dbg.log("page boot", { build: "ebay-watch-ui", page: "/" });
       dbg.initUI({
         getSearchesCount: () => (cachedSearches || []).length,
@@ -2948,7 +2949,7 @@
       const errEl = document.getElementById("login-error");
       const userEl = document.getElementById("login-user");
       const passEl = document.getElementById("login-pass");
-      overlay.hidden = false;
+      overlay.style.display = "flex";
       errEl.style.display = "none";
       userEl.value = "";
       passEl.value = "";
@@ -2974,7 +2975,7 @@
           if (res.status === 401) { showError("Incorrect username or password."); return; }
           if (!res.ok) { showError("Server error (" + res.status + "). Try again."); return; }
           try { localStorage.setItem(AUTH_LS_KEY, token); } catch (e) {}
-          overlay.hidden = true;
+          overlay.style.display = "none";
           _loginModalShowing = false;
           form.removeEventListener("submit", handleSubmit);
           onSuccess();
