@@ -1,0 +1,33 @@
+services:
+  ebay-watch:
+    build: .
+    # Or pull a pre-built image:
+    # image: ghcr.io/YOUR_GITHUB_USERNAME/ebay-watch:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persist the SQLite database across restarts
+      - ebay-watch-data:/data
+      # Optional: mount a custom searches.md to seed searches on first run.
+      # Copy config/searches.md to a local path and uncomment:
+      # - ./searches.md:/app/config/searches.md:ro
+    environment:
+      PORT: "8080"
+      POLL_INTERVAL_HOURS: "4"
+      PLAYWRIGHT_TIMEOUT_SECS: "400"
+      EBAY_PW_HEADLESS: "1"
+
+      # --- HTTP Basic Auth ---
+      # Change these before exposing the container to a network.
+      HTTP_AUTH_USER: "admin"
+      HTTP_AUTH_PASS: "ebaywatch"
+
+      # --- Optional: Gallery enrichment ---
+      # EBAY_SKIP_ITEM_GALLERY: "1"        # Faster polls, one image per listing
+      # EBAY_ITEM_GALLERY_CONCURRENCY: "3" # Parallel tabs (1–6)
+      # EBAY_ITEM_GALLERY_SETTLE_MS: "1200"
+
+    restart: unless-stopped
+
+volumes:
+  ebay-watch-data:
