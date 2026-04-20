@@ -11,7 +11,7 @@ jobs:
   poll:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger poll
+      - name: Wake machine
         env:
           POLL_URL: ${{ secrets.EBAY_WATCH_URL }}
           AUTH_USER: ${{ secrets.EBAY_WATCH_USER }}
@@ -26,23 +26,39 @@ jobs:
             exit 1
           fi
 
-          # Build auth flag only if credentials are provided
           AUTH_FLAG=""
           if [ -n "$AUTH_USER" ] && [ -n "$AUTH_PASS" ]; then
             AUTH_FLAG="-u ${AUTH_USER}:${AUTH_PASS}"
           fi
 
-          echo "Sending poll request to ${POLL_URL}/api/poll ..."
+          echo "Waiting for machine to be ready..."
+          curl -fsSX GET \
+            ${AUTH_FLAG} \
+            --connect-timeout 300 \
+            --max-time 300 \
+            --retry 10 \
+            --retry-delay 20 \
+            --retry-all-errors \
+            "${POLL_URL}/api/health"
+          echo "Machine is up."
+        timeout-minutes: 10
 
-          # --connect-timeout: give Fly.io / cold-start machines time to wake up
-          # --max-time: poll can run for up to 25 minutes (Playwright + gallery enrichment)
-          # --retry / --retry-delay: handle transient 503s during cold start
+      - name: Trigger poll
+        env:
+          POLL_URL: ${{ secrets.EBAY_WATCH_URL }}
+          AUTH_USER: ${{ secrets.EBAY_WATCH_USER }}
+          AUTH_PASS: ${{ secrets.EBAY_WATCH_PASS }}
+        run: |
+          AUTH_FLAG=""
+          if [ -n "$AUTH_USER" ] && [ -n "$AUTH_PASS" ]; then
+            AUTH_FLAG="-u ${AUTH_USER}:${AUTH_PASS}"
+          fi
+
+          echo "Triggering poll..."
           curl -fsSX POST \
             ${AUTH_FLAG} \
-            --connect-timeout 90 \
-            --max-time 120 \
-            --retry 3 \
-            --retry-delay 15 \
-            --retry-all-errors \
+            --connect-timeout 30 \
+            --max-time 30 \
             "${POLL_URL}/api/poll?async=1"
-        timeout-minutes: 30
+          echo "Poll started."
+        timeout-minutes: 2
