@@ -30,10 +30,9 @@ RUN npx playwright install --with-deps firefox chromium
 COPY --from=builder /ebay-watch /usr/local/bin/ebay-watch
 COPY scripts/ scripts/
 COPY web/ web/
-COPY config/ config/
 
-# Persistent data volume (SQLite database lives here)
-RUN mkdir -p /data
+# Persistent data volume and config directory (mount searches.md here to seed on first run)
+RUN mkdir -p /data /app/config
 ENV EBAY_WATCH_DATA_DIR=/data
 ENV PORT=8080
 ENV EBAY_PW_HEADLESS=1

@@ -2953,25 +2953,37 @@
       userEl.value = "";
       passEl.value = "";
       setTimeout(() => userEl.focus(), 50);
+      function showError(msg) {
+        errEl.textContent = msg;
+        errEl.style.display = "block";
+        passEl.value = "";
+        passEl.focus();
+      }
       const handleSubmit = async (ev) => {
         ev.preventDefault();
         const user = userEl.value.trim();
         const pass = passEl.value;
-        if (!user) { errEl.textContent = "Username is required."; errEl.style.display = ""; return; }
-        const token = btoa(user + ":" + pass);
-        const res = await fetch("/api/health", { headers: { Authorization: "Basic " + token } });
-        if (res.status === 401) {
-          errEl.textContent = "Invalid username or password.";
-          errEl.style.display = "";
-          passEl.value = "";
-          passEl.focus();
-          return;
+        if (!user) { showError("Username is required."); return; }
+        const btn = form.querySelector("button[type=submit]");
+        btn.disabled = true;
+        btn.textContent = "Checking…";
+        errEl.style.display = "none";
+        try {
+          const token = btoa(user + ":" + pass);
+          const res = await fetch("/api/health", { headers: { Authorization: "Basic " + token } });
+          if (res.status === 401) { showError("Incorrect username or password."); return; }
+          if (!res.ok) { showError("Server error (" + res.status + "). Try again."); return; }
+          try { localStorage.setItem(AUTH_LS_KEY, token); } catch (e) {}
+          overlay.hidden = true;
+          _loginModalShowing = false;
+          form.removeEventListener("submit", handleSubmit);
+          onSuccess();
+        } catch (e) {
+          showError("Could not reach server. Check your connection.");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Sign in";
         }
-        try { localStorage.setItem(AUTH_LS_KEY, token); } catch (e) {}
-        overlay.hidden = true;
-        _loginModalShowing = false;
-        form.removeEventListener("submit", handleSubmit);
-        onSuccess();
       };
       form.addEventListener("submit", handleSubmit);
     }
