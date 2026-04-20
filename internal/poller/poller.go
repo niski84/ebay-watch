@@ -6,13 +6,98 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
 	"ebay-watch/internal/ebay"
+	"ebay-watch/internal/imghash"
 	"ebay-watch/internal/store"
 )
+
+
+// parsePriceDollars extracts the first dollar amount from a price string like "$15,500" or "US $15,500".
+// Returns 0 if unparseable.
+func parsePriceDollars(s string) int {
+	s = strings.ReplaceAll(s, ",", "")
+	re := regexp.MustCompile(`\$([\d]+(?:\.\d+)?)`)
+	m := re.FindStringSubmatch(s)
+	if m == nil {
+		return 0
+	}
+	var f float64
+	fmt.Sscanf(m[1], "%f", &f)
+	return int(f)
+}
+
+// medianInts returns the median of a slice of ints (0 if empty).
+func medianInts(vals []int) int {
+	if len(vals) == 0 {
+		return 0
+	}
+	sorted := make([]int, len(vals))
+	copy(sorted, vals)
+	for i := 1; i < len(sorted); i++ {
+		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
+			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
+		}
+	}
+	mid := len(sorted) / 2
+	if len(sorted)%2 == 0 {
+		return (sorted[mid-1] + sorted[mid]) / 2
+	}
+	return sorted[mid]
+}
+
+var yearRE = regexp.MustCompile(`\b(19[6-9]\d|20[0-2]\d)\b`)
+
+// computeYearPrices derives per-year price stats from the active listings already fetched
+// by this poll and stores them. No extra network calls needed — the items slice IS the market sample.
+func computeYearPrices(st *store.Store, se store.Search, items []ebay.Item) {
+	type entry struct {
+		prices   []int
+		listings []store.SoldListing
+	}
+	byYear := map[int]*entry{}
+
+	for _, it := range items {
+		p := parsePriceDollars(it.PriceValue)
+		if p <= 0 {
+			continue
+		}
+		m := yearRE.FindString(it.Title)
+		if m == "" {
+			continue
+		}
+		y, _ := strconv.Atoi(m)
+		if byYear[y] == nil {
+			byYear[y] = &entry{}
+		}
+		byYear[y].prices = append(byYear[y].prices, p)
+		byYear[y].listings = append(byYear[y].listings, store.SoldListing{
+			Title: it.Title,
+			Price: p,
+			URL:   it.ItemWebURL,
+		})
+	}
+
+	for year, d := range byYear {
+		if len(d.prices) < 2 {
+			continue
+		}
+		med := medianInts(d.prices)
+		listingsJSON := ""
+		if b, err := json.Marshal(d.listings); err == nil {
+			listingsJSON = string(b)
+		}
+		if err := st.SetSearchYearMarketPrice(se.ID, year, med, len(d.prices), listingsJSON); err != nil {
+			fmt.Printf("[POLL] year-price store search_id=%d year=%d err=%v\n", se.ID, year, err)
+		} else {
+			fmt.Printf("[POLL] year-price search_id=%d year=%d median=$%d count=%d\n", se.ID, year, med, len(d.prices))
+		}
+	}
+}
 
 func pollSearch(ctx context.Context, st *store.Store, sch ebay.Searcher, se store.Search) error {
 	if ctx.Err() != nil {
@@ -38,10 +123,41 @@ func pollSearch(ctx context.Context, st *store.Store, sch ebay.Searcher, se stor
 	if err != nil {
 		return fmt.Errorf("search %d: rejected ids: %w", se.ID, err)
 	}
+	rejectedSellers, err := st.RejectedSellerNames()
+	if err != nil {
+		return fmt.Errorf("search %d: rejected sellers: %w", se.ID, err)
+	}
+	rejectedHashes, err := st.RejectedImageHashSet()
+	if err != nil {
+		fmt.Printf("[POLL] search_id=%d: image hash set err=%v (skipping hash check)\n", se.ID, err)
+		rejectedHashes = nil
+	}
 	var errs []error
 	for _, it := range items {
 		if _, skip := rejected[it.ItemID]; skip {
 			continue
+		}
+		if it.SellerName != "" {
+			if _, skip := rejectedSellers[it.SellerName]; skip {
+				continue
+			}
+		}
+		// Image hash check: if we have rejected hashes and the item has an image,
+		// download the primary image and compare its content hash.
+		if len(rejectedHashes) > 0 && it.ImageURL != "" {
+			hashCtx, hashCancel := context.WithTimeout(ctx, 8*time.Second)
+			h, hashErr := imghash.Fetch(hashCtx, it.ImageURL)
+			hashCancel()
+			if hashErr == nil {
+				if _, matched := rejectedHashes[h]; matched {
+					fmt.Printf("[POLL] auto-reject item_id=%s matched image hash\n", it.ItemID)
+					if rejectErr := st.Reject(it.ItemID); rejectErr != nil {
+						fmt.Printf("[POLL] auto-reject store err item_id=%s: %v\n", it.ItemID, rejectErr)
+					}
+					rejected[it.ItemID] = struct{}{} // prevent re-processing in same poll
+					continue
+				}
+			}
 		}
 		galleryJSON := ""
 		if len(it.ImageURLs) > 0 {
@@ -49,7 +165,7 @@ func pollSearch(ctx context.Context, st *store.Store, sch ebay.Searcher, se stor
 				galleryJSON = string(b)
 			}
 		}
-		if err := st.UpsertListing(se.ID, it.ItemID, it.Title, it.PriceValue, it.PriceCurrency, it.ImageURL, galleryJSON, it.ItemWebURL, it.Condition, it.ListingDetails); err != nil {
+		if err := st.UpsertListing(se.ID, it.ItemID, it.Title, it.PriceValue, it.PriceCurrency, it.ImageURL, galleryJSON, it.ItemWebURL, it.Condition, it.ListingDetails, it.SellerName, it.SellerFeedback); err != nil {
 			fmt.Printf("[POLL] upsert search_id=%d item_id=%s err=%v\n", se.ID, it.ItemID, err)
 			errs = append(errs, err)
 		}
@@ -58,6 +174,7 @@ func pollSearch(ctx context.Context, st *store.Store, sch ebay.Searcher, se stor
 		errs = append(errs, err)
 	}
 	fmt.Printf("[POLL] search_id=%d query=%q items=%d\n", se.ID, se.Query, len(items))
+	computeYearPrices(st, se, items)
 	return errors.Join(errs...)
 }
 

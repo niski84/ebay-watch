@@ -11,9 +11,54 @@ jobs:
   poll:
     runs-on: ubuntu-latest
     steps:
-      - name: Wake machine and trigger poll
+      - name: Wake machine
+        env:
+          POLL_URL: ${{ secrets.EBAY_WATCH_URL }}
+          AUTH_USER: ${{ secrets.EBAY_WATCH_USER }}
+          AUTH_PASS: ${{ secrets.EBAY_WATCH_PASS }}
         run: |
-          curl -fsS -X POST \
-            -u "${{ secrets.EBAY_WATCH_USER }}:${{ secrets.EBAY_WATCH_PASS }}" \
-            https://ebay-watch.fly.dev/api/poll
-        timeout-minutes: 30
+          if [ -z "$POLL_URL" ]; then
+            echo "ERROR: EBAY_WATCH_URL secret is not set."
+            echo "Add it in: GitHub repo → Settings → Secrets and variables → Actions"
+            echo "Value should be the full URL to your deployment, e.g.:"
+            echo "  https://ebay-watch.fly.dev"
+            echo "  http://your-nas-ip:8080"
+            exit 1
+          fi
+
+          AUTH_FLAG=""
+          if [ -n "$AUTH_USER" ] && [ -n "$AUTH_PASS" ]; then
+            AUTH_FLAG="-u ${AUTH_USER}:${AUTH_PASS}"
+          fi
+
+          echo "Waiting for machine to be ready..."
+          curl -fsSX GET \
+            ${AUTH_FLAG} \
+            --connect-timeout 300 \
+            --max-time 300 \
+            --retry 10 \
+            --retry-delay 20 \
+            --retry-all-errors \
+            "${POLL_URL}/api/health"
+          echo "Machine is up."
+        timeout-minutes: 10
+
+      - name: Trigger poll
+        env:
+          POLL_URL: ${{ secrets.EBAY_WATCH_URL }}
+          AUTH_USER: ${{ secrets.EBAY_WATCH_USER }}
+          AUTH_PASS: ${{ secrets.EBAY_WATCH_PASS }}
+        run: |
+          AUTH_FLAG=""
+          if [ -n "$AUTH_USER" ] && [ -n "$AUTH_PASS" ]; then
+            AUTH_FLAG="-u ${AUTH_USER}:${AUTH_PASS}"
+          fi
+
+          echo "Triggering poll..."
+          curl -fsSX POST \
+            ${AUTH_FLAG} \
+            --connect-timeout 30 \
+            --max-time 30 \
+            "${POLL_URL}/api/poll?async=1"
+          echo "Poll started."
+        timeout-minutes: 2

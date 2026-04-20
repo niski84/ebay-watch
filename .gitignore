@@ -5,8 +5,10 @@ test-results/
 *.db-shm
 *.db-wal
 .env
+.env.bak
 server.log
 server.pid
 data/
 node_modules/
 .env.fly
+config/searches.md

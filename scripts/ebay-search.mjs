@@ -304,7 +304,28 @@ function extractRows($, limit) {
         $el.find(".s-item__subtitle").first().text() ||
         $el.find(".s-item__subtitle-row").first().text() ||
         "";
-      const { condition, listingDetails } = parseConditionLine(subtitleRaw);
+      const { condition, listingDetails: rawDetails } = parseConditionLine(subtitleRaw);
+
+      // Detect "Best Offer" — eBay renders it as a secondary styled text span near the price.
+      const purchaseOpts = $el
+        .find("span.su-styled-text.secondary, .s-item__purchase-options-with-icon, .s-item__purchase-options")
+        .text()
+        .toLowerCase();
+      const hasBestOffer =
+        purchaseOpts.includes("best offer") ||
+        priceText.toLowerCase().includes("best offer");
+      const listingDetails = hasBestOffer
+        ? [rawDetails, "Best Offer: Yes"].filter(Boolean).join(" · ")
+        : rawDetails;
+
+      // eBay migrated to s-card layout; no dedicated seller CSS class exists.
+      // Secondary section has one row: first span = seller name, second = feedback score.
+      const sellerRow = $el.find(".su-card-container__attributes__secondary .s-card__attribute-row").first();
+      const sellerSpans = sellerRow.length ? sellerRow.find("span.su-styled-text.primary") : null;
+      const sellerRaw = sellerSpans && sellerSpans.length ? sellerSpans.eq(0).text().trim() : "";
+      const sellerFeedbackRaw = sellerSpans && sellerSpans.length > 1 ? sellerSpans.eq(1).text().trim() : "";
+      const sellerName = sellerRaw.replace(/^(from\s+)?seller\s*:\s*/i, "").trim();
+      const sellerFeedback = sellerFeedbackRaw;
 
       seen.add(itemId);
       rows.push({
@@ -317,6 +338,8 @@ function extractRows($, limit) {
         priceCurrency: "USD",
         condition,
         listingDetails,
+        sellerName,
+        sellerFeedback,
       });
     },
   );
@@ -630,6 +653,60 @@ async function primeItemGalleryDom(page) {
     .catch(() => {});
 }
 
+/**
+ * Scrape eBay's market price analysis badge from an item page.
+ * Uses text-node walking rather than class selectors so it survives eBay markup rotations.
+ * Returns a string like "Great Deal · $1,200 below market", "High Price", or "".
+ */
+async function scrapePriceAnalysis(page) {
+  return page.evaluate(() => {
+    const SENTIMENTS = ["Great Deal", "Good Deal", "Good Price", "Fair Price", "High Price", "Overpriced"];
+
+    let sentiment = null;
+    let delta = null;
+
+    // Walk every text node looking for exact sentiment matches and delta patterns.
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+    while (walker.nextNode()) {
+      const raw = walker.currentNode.textContent || "";
+      const t = raw.replace(/\s+/g, " ").trim();
+      if (!t) continue;
+
+      if (!sentiment) {
+        for (const s of SENTIMENTS) {
+          if (t === s) { sentiment = s; break; }
+        }
+      }
+
+      if (!delta) {
+        // "$1,200 below market" / "$800 above market" / "1,200 below market"
+        const m = t.match(/^\$?([\d,]+)\s*(below|above)\s*market$/i);
+        if (m) delta = `$${m[1]} ${m[2].toLowerCase()} market`;
+      }
+
+      if (sentiment && delta) break;
+    }
+
+    // Fallback: regex on full body text (catches multi-node renders)
+    if (!sentiment || !delta) {
+      const body = document.body.innerText || "";
+      if (!sentiment) {
+        for (const s of SENTIMENTS) {
+          // require word boundary so "Fair Price" doesn't match "Unfair Pricing"
+          if (new RegExp("\\b" + s + "\\b").test(body)) { sentiment = s; break; }
+        }
+      }
+      if (!delta) {
+        const m = body.match(/\$([\d,]+)\s*(below|above)\s*market/i);
+        if (m) delta = `$${m[1]} ${m[2].toLowerCase()} market`;
+      }
+    }
+
+    if (!sentiment) return "";
+    return delta ? `${sentiment} (${delta})` : sentiment;
+  }).catch(() => "");
+}
+
 async function enrichRowsGallery(browser, rows) {
   if (process.env.EBAY_SKIP_ITEM_GALLERY === "1") {
     console.error("[ebay-search] skipping item-page galleries (EBAY_SKIP_ITEM_GALLERY=1)");
@@ -663,9 +740,10 @@ async function enrichRowsGallery(browser, rows) {
         await new Promise((r) => setTimeout(r, settleMs));
         await primeItemGalleryDom(page);
         await new Promise((r) => setTimeout(r, 650));
-        const [raw1, specifics] = await Promise.all([
+        const [raw1, specifics, priceAnalysis] = await Promise.all([
           scrapeItemPageGalleryUrls(page),
           scrapeItemSpecifics(page),
+          scrapePriceAnalysis(page),
         ]);
         await primeItemGalleryDom(page);
         await new Promise((r) => setTimeout(r, 400));
@@ -676,8 +754,38 @@ async function enrichRowsGallery(browser, rows) {
           row.imageUrls = mergeGalleries(row.imageUrls, mergedRaw);
           row.imageUrl = row.imageUrls[0] || row.imageUrl;
         }
-        if (specifics) {
-          row.listingDetails = [row.listingDetails, specifics].filter(Boolean).join(" · ");
+        const detailParts = [row.listingDetails, specifics];
+        if (priceAnalysis) {
+          detailParts.push("eBay Deal: " + priceAnalysis);
+          console.error(`[ebay-search] price-analysis item=${row.itemId}: ${priceAnalysis}`);
+        }
+        row.listingDetails = detailParts.filter(Boolean).join(" · ");
+        // Extract seller name + feedback from item page if SERP didn't provide them
+        if (!row.sellerName || !row.sellerFeedback) {
+          const sellerInfo = await page.evaluate(() => {
+            const card = document.querySelector('[data-testid="x-sellercard-atf"]');
+            let name = "";
+            let feedback = "";
+            if (card) {
+              const a = card.querySelector('a[href*="/str/"]');
+              if (a) {
+                const m = a.href.match(/\/str\/([^?/]+)/);
+                if (m) name = decodeURIComponent(m[1]);
+              }
+              // feedback: look for "X% positive (N)" text
+              const spans = Array.from(card.querySelectorAll("span"));
+              for (const s of spans) {
+                const t = s.textContent.trim();
+                if (/\d+%.*positive|\d[\d,]+\s*(feedback|ratings|reviews)/i.test(t)) {
+                  feedback = t;
+                  break;
+                }
+              }
+            }
+            return {name, feedback};
+          }).catch(() => ({name: "", feedback: ""}));
+          if (sellerInfo.name && !row.sellerName) row.sellerName = sellerInfo.name;
+          if (sellerInfo.feedback && !row.sellerFeedback) row.sellerFeedback = sellerInfo.feedback;
         }
       } catch (e) {
     if (e && e.name === "TimeoutError") {

@@ -4,15 +4,16 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-# We use modernc.org/sqlite, so CGO_ENABLED=0 works perfectly
-RUN CGO_ENABLED=0 GOOS=linux go build -o /ebay-watch ./cmd/ebay-watch
+# modernc.org/sqlite is a pure-Go SQLite driver — CGO_ENABLED=0 works fine
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags "-X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -o /ebay-watch ./cmd/ebay-watch
 
-# Stage 2: Final runtime image (Node.js + Playwright Browsers + Go Binary)
+# Stage 2: Runtime image (Node.js + Playwright browsers + Go binary)
 FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
-ENV EBAY_PW_HEADLESS=1
 
-# Install Node.js
+# Install Node.js 20.x
 RUN apt-get update && apt-get install -y curl ca-certificates && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs && \
@@ -25,16 +26,21 @@ COPY package.json package-lock.json ./
 RUN npm ci
 RUN npx playwright install --with-deps firefox chromium
 
-# Copy our compiled Go backend and local files
+# Copy compiled Go binary and static assets
 COPY --from=builder /ebay-watch /usr/local/bin/ebay-watch
 COPY scripts/ scripts/
 COPY web/ web/
+COPY config/ config/
 
-# Prepare volume for SQLite and Config
-RUN mkdir -p /data /app/config
+# Persistent data volume (SQLite database lives here)
+RUN mkdir -p /data
 ENV EBAY_WATCH_DATA_DIR=/data
 ENV PORT=8080
+ENV EBAY_PW_HEADLESS=1
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8080/api/health || exit 1
 
 CMD ["ebay-watch"]

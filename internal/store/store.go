@@ -13,6 +13,13 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// SoldListing is one sold item from completed listings SERP (for display in the frontend).
+type SoldListing struct {
+	Title string `json:"title"`
+	Price int    `json:"price"`
+	URL   string `json:"url"`
+}
+
 // Search is a saved eBay query the poller runs on a schedule.
 type Search struct {
 	ID                  int64      `json:"id"`
@@ -28,6 +35,12 @@ type Search struct {
 	MaxPrice            string     `json:"max_price,omitempty"`
 	CreatedAt           time.Time  `json:"created_at"`
 	LastPolledAt        *time.Time `json:"last_polled_at,omitempty"`
+	MarketPrice         int                 `json:"market_price,omitempty"`           // overall median sold price in whole dollars (0 = unknown)
+	MarketPriceCount    int                 `json:"market_price_count,omitempty"`     // number of sold samples (overall)
+	MarketPriceAt       *time.Time          `json:"market_price_at,omitempty"`        // when market price was last fetched
+	MarketPricesByYear  map[int]int           `json:"market_prices_by_year,omitempty"`  // year → median asking price
+	MarketCountsByYear  map[int]int           `json:"market_counts_by_year,omitempty"`  // year → active listing count
+	ListingsByYear      map[int][]SoldListing `json:"listings_by_year,omitempty"`       // year → comparable active listings
 }
 
 // Listing is a cached item row from the last successful poll for a search.
@@ -43,6 +56,8 @@ type Listing struct {
 	ImageURL       string    `json:"image_url"`
 	ImageURLs      []string  `json:"image_urls,omitempty"`
 	ItemWebURL     string    `json:"item_web_url"`
+	SellerName     string    `json:"seller_name,omitempty"`
+	SellerFeedback string    `json:"seller_feedback,omitempty"`
 	FetchedAt      time.Time `json:"fetched_at"`
 	Seen           bool      `json:"seen"`
 }
@@ -60,7 +75,7 @@ func Open(dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	dsn := "file:" + filepath.ToSlash(abs) + "?_pragma=foreign_keys(1)"
+	dsn := "file:" + filepath.ToSlash(abs) + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -69,6 +84,8 @@ func Open(dbPath string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	// Limit concurrent writers to avoid SQLITE_BUSY under load.
+	db.SetMaxOpenConns(1)
 	s := &Store{db: db}
 	if err := s.initSchema(); err != nil {
 		_ = db.Close()
@@ -116,6 +133,26 @@ CREATE TABLE IF NOT EXISTS rejects (
   ebay_item_id TEXT PRIMARY KEY,
   rejected_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS rejected_sellers (
+  seller_name TEXT PRIMARY KEY,
+  rejected_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS search_year_market_prices (
+  search_id INTEGER NOT NULL REFERENCES searches(id) ON DELETE CASCADE,
+  year INTEGER NOT NULL,
+  market_price INTEGER NOT NULL DEFAULT 0,
+  market_price_count INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (search_id, year)
+);
+
+CREATE TABLE IF NOT EXISTS rejected_image_hashes (
+  hash TEXT PRIMARY KEY,
+  source_item_id TEXT NOT NULL,
+  rejected_at TEXT NOT NULL
+);
 `)
 	if err != nil {
 		return err
@@ -138,7 +175,22 @@ CREATE TABLE IF NOT EXISTS rejects (
 	if err := s.migrateSearchesV2(); err != nil {
 		return err
 	}
-	return s.migrateSearchFiltersV3()
+	if err := s.migrateSearchFiltersV3(); err != nil {
+		return err
+	}
+	if err := s.migrateListingsSellerName(); err != nil {
+		return err
+	}
+	if err := s.migrateListingsSellerFeedback(); err != nil {
+		return err
+	}
+	if err := s.migrateRejectedImageHashes(); err != nil {
+		return err
+	}
+	if err := s.migrateSearchMarketPrice(); err != nil {
+		return err
+	}
+	return s.migrateYearMarketPricesListings()
 }
 
 func (s *Store) migrateSearchesV2() error {
@@ -230,6 +282,59 @@ func (s *Store) migrateSearchFiltersV3() error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) migrateListingsSellerName() error {
+	if _, err := s.db.Exec(`ALTER TABLE listings ADD COLUMN seller_name TEXT NOT NULL DEFAULT ''`); err != nil {
+		msg := strings.ToLower(err.Error())
+		if !strings.Contains(msg, "duplicate column") {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) migrateListingsSellerFeedback() error {
+	if _, err := s.db.Exec(`ALTER TABLE listings ADD COLUMN seller_feedback TEXT NOT NULL DEFAULT ''`); err != nil {
+		msg := strings.ToLower(err.Error())
+		if !strings.Contains(msg, "duplicate column") {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) migrateSearchMarketPrice() error {
+	for _, q := range []string{
+		`ALTER TABLE searches ADD COLUMN market_price INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE searches ADD COLUMN market_price_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE searches ADD COLUMN market_price_at TEXT`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			if !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Store) migrateYearMarketPricesListings() error {
+	if _, err := s.db.Exec(`ALTER TABLE search_year_market_prices ADD COLUMN sold_listings_json TEXT NOT NULL DEFAULT ''`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) migrateRejectedImageHashes() error {
+	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS rejected_image_hashes (
+  hash TEXT PRIMARY KEY,
+  source_item_id TEXT NOT NULL,
+  rejected_at TEXT NOT NULL
+);`)
+	return err
 }
 
 func (s *Store) migrateItemSeen() error {
@@ -351,77 +456,137 @@ func (s *Store) SeedSearches(queries []string) error {
 	return nil
 }
 
-// GetSearch returns one search by id, or ErrSearchNotFound.
-func (s *Store) GetSearch(id int64) (*Search, error) {
+const searchSelectCols = `
+SELECT id, query, enabled, IFNULL(show_in_results,1), IFNULL(item_condition_filter,''), IFNULL(ebay_search_url,''),
+  IFNULL(title_filter,''), IFNULL(exclude_filter,''), IFNULL(min_price,''), IFNULL(max_price,''),
+  created_at, last_polled_at,
+  IFNULL(market_price,0), IFNULL(market_price_count,0), market_price_at`
+
+func scanSearch(row interface {
+	Scan(...any) error
+}) (Search, error) {
 	var se Search
 	var created string
-	var lastPolled sql.NullString
+	var lastPolled, marketPriceAt sql.NullString
 	var en, sir int
-	err := s.db.QueryRow(`
-SELECT id, query, enabled, IFNULL(show_in_results, 1), IFNULL(item_condition_filter, ''), IFNULL(ebay_search_url, ''), IFNULL(title_filter, ''), IFNULL(exclude_filter, ''), IFNULL(min_price, ''), IFNULL(max_price, ''), created_at, last_polled_at
-FROM searches WHERE id = ?`, id,
-	).Scan(&se.ID, &se.Query, &en, &sir, &se.ItemConditionFilter, &se.EbaySearchURL, &se.TitleFilter, &se.ExcludeFilter, &se.MinPrice, &se.MaxPrice, &created, &lastPolled)
+	if err := row.Scan(
+		&se.ID, &se.Query, &en, &sir, &se.ItemConditionFilter, &se.EbaySearchURL,
+		&se.TitleFilter, &se.ExcludeFilter, &se.MinPrice, &se.MaxPrice,
+		&created, &lastPolled,
+		&se.MarketPrice, &se.MarketPriceCount, &marketPriceAt,
+	); err != nil {
+		return se, err
+	}
+	se.Enabled = en != 0
+	se.ShowInResults = sir != 0
+	t, err := time.Parse(time.RFC3339, created)
+	if err != nil {
+		return se, err
+	}
+	se.CreatedAt = t
+	if lastPolled.Valid {
+		lp, err := time.Parse(time.RFC3339, lastPolled.String)
+		if err != nil {
+			return se, err
+		}
+		se.LastPolledAt = &lp
+	}
+	if marketPriceAt.Valid {
+		mp, err := time.Parse(time.RFC3339, marketPriceAt.String)
+		if err == nil {
+			se.MarketPriceAt = &mp
+		}
+	}
+	return se, nil
+}
+
+// GetSearch returns one search by id, or ErrSearchNotFound.
+func (s *Store) GetSearch(id int64) (*Search, error) {
+	row := s.db.QueryRow(searchSelectCols+` FROM searches WHERE id = ?`, id)
+	se, err := scanSearch(row)
 	if err == sql.ErrNoRows {
 		return nil, ErrSearchNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	se.Enabled = en != 0
-	se.ShowInResults = sir != 0
-	t, err := time.Parse(time.RFC3339, created)
-	if err != nil {
-		return nil, err
-	}
-	se.CreatedAt = t
-	if lastPolled.Valid {
-		lp, err := time.Parse(time.RFC3339, lastPolled.String)
-		if err != nil {
-			return nil, err
-		}
-		se.LastPolledAt = &lp
-	}
 	return &se, nil
 }
 
 // ListSearches returns all saved searches.
 func (s *Store) ListSearches() ([]Search, error) {
-	rows, err := s.db.Query(`
-SELECT id, query, enabled, IFNULL(show_in_results, 1), IFNULL(item_condition_filter, ''), IFNULL(ebay_search_url, ''), IFNULL(title_filter, ''), IFNULL(exclude_filter, ''), IFNULL(min_price, ''), IFNULL(max_price, ''), created_at, last_polled_at
-FROM searches ORDER BY id`)
+	rows, err := s.db.Query(searchSelectCols + ` FROM searches ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Search
 	for rows.Next() {
-		var (
-			se         Search
-			created    string
-			lastPolled sql.NullString
-			en         int
-			sir        int
-		)
-		if err := rows.Scan(&se.ID, &se.Query, &en, &sir, &se.ItemConditionFilter, &se.EbaySearchURL, &se.TitleFilter, &se.ExcludeFilter, &se.MinPrice, &se.MaxPrice, &created, &lastPolled); err != nil {
-			return nil, err
-		}
-		se.Enabled = en != 0
-		se.ShowInResults = sir != 0
-		t, err := time.Parse(time.RFC3339, created)
+		se, err := scanSearch(rows)
 		if err != nil {
 			return nil, err
-		}
-		se.CreatedAt = t
-		if lastPolled.Valid {
-			lp, err := time.Parse(time.RFC3339, lastPolled.String)
-			if err != nil {
-				return nil, err
-			}
-			se.LastPolledAt = &lp
 		}
 		out = append(out, se)
 	}
 	return out, rows.Err()
+}
+
+// SetSearchMarketPrice stores median sold price (in whole dollars) and sample count for a search.
+func (s *Store) SetSearchMarketPrice(id int64, price, count int) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(
+		`UPDATE searches SET market_price=?, market_price_count=?, market_price_at=? WHERE id=?`,
+		price, count, now, id,
+	)
+	return err
+}
+
+// SetSearchYearMarketPrice stores the median sold price for a specific model year within a search.
+// listingsJSON is a JSON array of SoldListing objects (may be empty string).
+func (s *Store) SetSearchYearMarketPrice(searchID int64, year, price, count int, listingsJSON string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`
+INSERT INTO search_year_market_prices (search_id, year, market_price, market_price_count, sold_listings_json, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(search_id, year) DO UPDATE SET
+  market_price=excluded.market_price,
+  market_price_count=excluded.market_price_count,
+  sold_listings_json=excluded.sold_listings_json,
+  updated_at=excluded.updated_at`,
+		searchID, year, price, count, listingsJSON, now,
+	)
+	return err
+}
+
+// GetSearchYearMarketPrices returns prices, counts, and sold listings keyed by year for a search.
+func (s *Store) GetSearchYearMarketPrices(searchID int64) (prices map[int]int, counts map[int]int, listings map[int][]SoldListing, err error) {
+	rows, err := s.db.Query(
+		`SELECT year, market_price, market_price_count, IFNULL(sold_listings_json,'') FROM search_year_market_prices WHERE search_id=? AND market_price>0`,
+		searchID,
+	)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer rows.Close()
+	prices = make(map[int]int)
+	counts = make(map[int]int)
+	listings = make(map[int][]SoldListing)
+	for rows.Next() {
+		var year, price, count int
+		var listingsJSON string
+		if err := rows.Scan(&year, &price, &count, &listingsJSON); err != nil {
+			return nil, nil, nil, err
+		}
+		prices[year] = price
+		counts[year] = count
+		if listingsJSON != "" {
+			var sl []SoldListing
+			if json.Unmarshal([]byte(listingsJSON), &sl) == nil {
+				listings[year] = sl
+			}
+		}
+	}
+	return prices, counts, listings, rows.Err()
 }
 
 // AddSearch creates a new search row. When ebaySearchURL is set, itemConditionFilter is ignored for scraping.
@@ -611,6 +776,98 @@ func (s *Store) RejectedEbayItemIDs() (map[string]struct{}, error) {
 	return out, rows.Err()
 }
 
+// RejectSeller blocks all listings from a given eBay seller name globally.
+func (s *Store) RejectSeller(sellerName string) error {
+	sellerName = strings.TrimSpace(sellerName)
+	if sellerName == "" {
+		return fmt.Errorf("seller_name: %w", ErrEmpty)
+	}
+	if len(sellerName) > 256 {
+		return fmt.Errorf("seller_name too long")
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`INSERT OR REPLACE INTO rejected_sellers (seller_name, rejected_at) VALUES (?, ?)`, sellerName, now)
+	return err
+}
+
+// RejectedSellerNames returns every blocked seller name for poll-time filtering.
+func (s *Store) RejectedSellerNames() (map[string]struct{}, error) {
+	rows, err := s.db.Query(`SELECT seller_name FROM rejected_sellers`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]struct{})
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		name = strings.TrimSpace(name)
+		if name != "" {
+			out[name] = struct{}{}
+		}
+	}
+	return out, rows.Err()
+}
+
+// GetListingImageURLs returns the primary and gallery image URLs for an item (used before deletion).
+func (s *Store) GetListingImageURLs(ebayItemID string) ([]string, error) {
+	var imageURL, galleryJSON string
+	err := s.db.QueryRow(
+		`SELECT IFNULL(image_url,''), IFNULL(image_gallery,'') FROM listings WHERE ebay_item_id = ? LIMIT 1`,
+		ebayItemID,
+	).Scan(&imageURL, &galleryJSON)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return listingImageURLs(galleryJSON, imageURL), nil
+}
+
+// StoreImageHashes persists content hashes for images belonging to a rejected item.
+func (s *Store) StoreImageHashes(hashes []string, sourceItemID string) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, h := range hashes {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			continue
+		}
+		if _, err := s.db.Exec(
+			`INSERT OR IGNORE INTO rejected_image_hashes (hash, source_item_id, rejected_at) VALUES (?, ?, ?)`,
+			h, sourceItemID, now,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RejectedImageHashSet returns all stored image hashes as a set for O(1) poll-time lookup.
+func (s *Store) RejectedImageHashSet() (map[string]struct{}, error) {
+	rows, err := s.db.Query(`SELECT hash FROM rejected_image_hashes`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]struct{})
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			return nil, err
+		}
+		if h != "" {
+			out[h] = struct{}{}
+		}
+	}
+	return out, rows.Err()
+}
+
 // MarkItemSeen records that the user has reviewed this listing (global per eBay item id).
 func (s *Store) MarkItemSeen(ebayItemID string) error {
 	if err := ValidateItemID(ebayItemID); err != nil {
@@ -623,11 +880,11 @@ func (s *Store) MarkItemSeen(ebayItemID string) error {
 
 // UpsertListing stores or refreshes a listing for a search.
 // imageGalleryJSON is a JSON array of image URLs (empty if none); imageURL should be the primary thumbnail (first gallery URL is typical).
-func (s *Store) UpsertListing(searchID int64, ebayItemID, title, priceValue, priceCurrency, imageURL, imageGalleryJSON, itemWebURL, condition, listingDetails string) error {
+func (s *Store) UpsertListing(searchID int64, ebayItemID, title, priceValue, priceCurrency, imageURL, imageGalleryJSON, itemWebURL, condition, listingDetails, sellerName, sellerFeedback string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-INSERT INTO listings (ebay_item_id, search_id, title, item_condition, listing_details, price_value, price_currency, image_url, image_gallery, item_web_url, fetched_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO listings (ebay_item_id, search_id, title, item_condition, listing_details, price_value, price_currency, image_url, image_gallery, item_web_url, seller_name, seller_feedback, fetched_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(search_id, ebay_item_id) DO UPDATE SET
   title = excluded.title,
   item_condition = excluded.item_condition,
@@ -637,8 +894,10 @@ ON CONFLICT(search_id, ebay_item_id) DO UPDATE SET
   image_url = excluded.image_url,
   image_gallery = excluded.image_gallery,
   item_web_url = excluded.item_web_url,
+  seller_name = excluded.seller_name,
+  seller_feedback = excluded.seller_feedback,
   fetched_at = excluded.fetched_at
-`, ebayItemID, searchID, title, condition, listingDetails, priceValue, priceCurrency, imageURL, imageGalleryJSON, itemWebURL, now)
+`, ebayItemID, searchID, title, condition, listingDetails, priceValue, priceCurrency, imageURL, imageGalleryJSON, itemWebURL, sellerName, sellerFeedback, now)
 	return err
 }
 
@@ -647,12 +906,12 @@ ON CONFLICT(search_id, ebay_item_id) DO UPDATE SET
 func (s *Store) ListVisibleListings() ([]Listing, error) {
 	rows, err := s.db.Query(`
 SELECT l.ebay_item_id, l.search_id, s.query, l.title, IFNULL(l.item_condition, ''), IFNULL(l.listing_details, ''),
-  l.price_value, l.price_currency, l.image_url, IFNULL(l.image_gallery, ''), l.item_web_url, l.fetched_at,
+  l.price_value, l.price_currency, l.image_url, IFNULL(l.image_gallery, ''), l.item_web_url, IFNULL(l.seller_name, ''), IFNULL(l.seller_feedback, ''), l.fetched_at,
   CASE WHEN EXISTS (SELECT 1 FROM item_seen v WHERE v.ebay_item_id = l.ebay_item_id) THEN 1 ELSE 0 END
 FROM listings l
 JOIN searches s ON s.id = l.search_id
-WHERE IFNULL(s.show_in_results, 1) != 0
-  AND NOT EXISTS (SELECT 1 FROM rejects r WHERE r.ebay_item_id = l.ebay_item_id)
+WHERE NOT EXISTS (SELECT 1 FROM rejects r WHERE r.ebay_item_id = l.ebay_item_id)
+  AND NOT EXISTS (SELECT 1 FROM rejected_sellers rs WHERE rs.seller_name = l.seller_name AND l.seller_name != '')
 ORDER BY l.fetched_at DESC, l.id DESC
 `)
 	if err != nil {
@@ -721,7 +980,7 @@ func scanListings(rows *sql.Rows) ([]Listing, error) {
 		if err := rows.Scan(
 			&l.EbayItemID, &l.SearchID, &l.SearchQuery, &l.Title,
 			&l.Condition, &l.ListingDetails,
-			&l.PriceValue, &l.PriceCurrency, &l.ImageURL, &galleryRaw, &l.ItemWebURL, &fetched,
+			&l.PriceValue, &l.PriceCurrency, &l.ImageURL, &galleryRaw, &l.ItemWebURL, &l.SellerName, &l.SellerFeedback, &fetched,
 			&seen,
 		); err != nil {
 			return nil, err
@@ -745,40 +1004,18 @@ func (s *Store) TotalSearchRows() (int, error) {
 	return n, err
 }
 
-// ListEnabledSearches returns id and query for polling.
+// ListEnabledSearches returns enabled searches for polling.
 func (s *Store) ListEnabledSearches() ([]Search, error) {
-	rows, err := s.db.Query(`
-SELECT id, query, enabled, IFNULL(show_in_results, 1), IFNULL(item_condition_filter, ''), IFNULL(ebay_search_url, ''), IFNULL(title_filter, ''), IFNULL(exclude_filter, ''), IFNULL(min_price, ''), IFNULL(max_price, ''), created_at, last_polled_at
-FROM searches WHERE enabled = 1 ORDER BY id`)
+	rows, err := s.db.Query(searchSelectCols + ` FROM searches WHERE enabled = 1 ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Search
 	for rows.Next() {
-		var (
-			se         Search
-			created    string
-			lastPolled sql.NullString
-			en         int
-			sir        int
-		)
-		if err := rows.Scan(&se.ID, &se.Query, &en, &sir, &se.ItemConditionFilter, &se.EbaySearchURL, &se.TitleFilter, &se.ExcludeFilter, &se.MinPrice, &se.MaxPrice, &created, &lastPolled); err != nil {
-			return nil, err
-		}
-		se.Enabled = en != 0
-		se.ShowInResults = sir != 0
-		t, err := time.Parse(time.RFC3339, created)
+		se, err := scanSearch(rows)
 		if err != nil {
 			return nil, err
-		}
-		se.CreatedAt = t
-		if lastPolled.Valid {
-			lp, err := time.Parse(time.RFC3339, lastPolled.String)
-			if err != nil {
-				return nil, err
-			}
-			se.LastPolledAt = &lp
 		}
 		out = append(out, se)
 	}
